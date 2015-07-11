@@ -358,6 +358,8 @@ struct mdss_mdp_pp_tear_check {
 	u32 refx100;
 };
 
+struct mdss_livedisplay_ctx;
+
 struct mdss_panel_info {
 	u32 xres;
 	u32 yres;
@@ -434,6 +436,11 @@ struct mdss_panel_info {
 	struct mipi_panel_info mipi;
 	struct lvds_panel_info lvds;
 	struct edp_panel_info edp;
+
+	/* debugfs structure for the panel */
+	struct mdss_panel_debugfs_info *debugfs_info;
+
+	struct mdss_livedisplay_ctx *livedisplay;
 #if defined(CONFIG_FB_MSM_MDSS_SAMSUNG)
 	int panel_state;
 #endif
@@ -458,6 +465,10 @@ struct mipi_samsung_driver_data {
 	struct lcd_device *lcd_device;
 	void *mdss_panel_data;
 	void *mdss_dsi_ctrl_pdata;
+	/* debugfs structure for the panel */
+	struct mdss_panel_debugfs_info *debugfs_info;
+
+	struct mdss_livedisplay_ctx *livedisplay;
 };
 
 struct mdss_panel_data {
