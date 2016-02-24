@@ -52,6 +52,7 @@ struct sched_param {
 #include <linux/llist.h>
 #include <linux/uidgid.h>
 #include <linux/gfp.h>
+#include <linux/cpufreq.h>
 
 #include <asm/processor.h>
 
@@ -1146,6 +1147,27 @@ enum perf_event_task_context {
 	perf_nr_task_contexts,
 };
 
+
+#ifdef CONFIG_TASK_CPUFREQ_STATS
+struct task_cpufreq_stats {
+	int max_state;
+	/*
+	 * a table holding the current time
+	 * (in jiffies) on this CPU at
+	 * frequency freq_table[i]. freq_table can be
+         * obtained from drivers/cpufreq/freq_table.h.
+	 */
+	u64 *time_in_state;
+	/*
+	 * a table holding the cumulative time
+         * (in jiffies) spent by this task on this CPU
+	 * at frequency freq_table[i]. freq_table can be
+         * obtained from drivers/cpufreq/freq_table.h.
+	 */
+	u64 *cumulative_time_in_state;
+};
+#endif
+
 struct task_struct {
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	void *stack;
@@ -1537,6 +1559,9 @@ struct task_struct {
 #endif
 #ifdef CONFIG_SDP
 	unsigned int sensitive;
+#endif
+#ifdef CONFIG_TASK_CPUFREQ_STATS
+	struct task_cpufreq_stats cpufreq_stats[NR_CPUS];
 #endif
 };
 
