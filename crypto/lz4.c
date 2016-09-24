@@ -25,78 +25,78 @@
 #include <linux/lz4.h>
 
 struct lz4_ctx {
-	void *lz4_comp_mem;
+    void *lz4_comp_mem;
 };
 
 static int lz4_init(struct crypto_tfm *tfm)
 {
-	struct lz4_ctx *ctx = crypto_tfm_ctx(tfm);
+    struct lz4_ctx *ctx = crypto_tfm_ctx(tfm);
 
-	ctx->lz4_comp_mem = vmalloc(LZ4_MEM_COMPRESS);
-	if (!ctx->lz4_comp_mem)
-		return -ENOMEM;
+    ctx->lz4_comp_mem = vmalloc(LZ4_MEM_COMPRESS);
+    if (!ctx->lz4_comp_mem)
+	return -ENOMEM;
 
-	return 0;
+    return 0;
 }
 
 static void lz4_exit(struct crypto_tfm *tfm)
 {
-	struct lz4_ctx *ctx = crypto_tfm_ctx(tfm);
-	vfree(ctx->lz4_comp_mem);
+    struct lz4_ctx *ctx = crypto_tfm_ctx(tfm);
+    vfree(ctx->lz4_comp_mem);
 }
 
 static int lz4_compress_crypto(struct crypto_tfm *tfm, const u8 *src,
-			    unsigned int slen, u8 *dst, unsigned int *dlen)
+	        unsigned int slen, u8 *dst, unsigned int *dlen)
 {
-	struct lz4_ctx *ctx = crypto_tfm_ctx(tfm);
-	size_t tmp_len = *dlen;
-	int err;
+    struct lz4_ctx *ctx = crypto_tfm_ctx(tfm);
+    size_t tmp_len = *dlen;
+    int err;
 
-	err = lz4_compress(src, slen, dst, &tmp_len, ctx->lz4_comp_mem);
+    err = lz4_compress(src, slen, dst, &tmp_len, ctx->lz4_comp_mem);
 
-	if (err < 0)
-		return -EINVAL;
+    if (err < 0)
+	return -EINVAL;
 
-	*dlen = tmp_len;
-	return 0;
+    *dlen = tmp_len;
+    return 0;
 }
 
 static int lz4_decompress_crypto(struct crypto_tfm *tfm, const u8 *src,
-			      unsigned int slen, u8 *dst, unsigned int *dlen)
+	          unsigned int slen, u8 *dst, unsigned int *dlen)
 {
-	int err;
-	size_t tmp_len = *dlen;
-	size_t __slen = slen;
+    int err;
+    size_t tmp_len = *dlen;
+    size_t __slen = slen;
 
-	err = lz4_decompress_unknownoutputsize(src, __slen, dst, &tmp_len);
-	if (err < 0)
-		return -EINVAL;
+    err = lz4_decompress(src, &__slen, dst, tmp_len);
+    if (err < 0)
+	return -EINVAL;
 
-	*dlen = tmp_len;
-	return err;
+    *dlen = tmp_len;
+    return err;
 }
 
 static struct crypto_alg alg_lz4 = {
-	.cra_name		= "lz4",
-	.cra_flags		= CRYPTO_ALG_TYPE_COMPRESS,
-	.cra_ctxsize		= sizeof(struct lz4_ctx),
-	.cra_module		= THIS_MODULE,
-	.cra_list		= LIST_HEAD_INIT(alg_lz4.cra_list),
-	.cra_init		= lz4_init,
-	.cra_exit		= lz4_exit,
-	.cra_u			= { .compress = {
-	.coa_compress		= lz4_compress_crypto,
-	.coa_decompress		= lz4_decompress_crypto } }
+    .cra_name		= "lz4",
+    .cra_flags		= CRYPTO_ALG_TYPE_COMPRESS,
+    .cra_ctxsize		= sizeof(struct lz4_ctx),
+    .cra_module		= THIS_MODULE,
+    .cra_list		= LIST_HEAD_INIT(alg_lz4.cra_list),
+    .cra_init		= lz4_init,
+    .cra_exit		= lz4_exit,
+    .cra_u			= { .compress = {
+    .coa_compress		= lz4_compress_crypto,
+    .coa_decompress		= lz4_decompress_crypto } }
 };
 
 static int __init lz4_mod_init(void)
 {
-	return crypto_register_alg(&alg_lz4);
+    return crypto_register_alg(&alg_lz4);
 }
 
 static void __exit lz4_mod_fini(void)
 {
-	crypto_unregister_alg(&alg_lz4);
+    crypto_unregister_alg(&alg_lz4);
 }
 
 module_init(lz4_mod_init);
