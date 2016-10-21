@@ -155,6 +155,10 @@ struct fuse_file {
 
 	/** Has flock been performed on this file? */
 	bool flock:1;
+
+	/* the read write file */
+	struct file *rw_lower_file;
+	bool shortcircuit_enabled;
 };
 
 /** One input argument of a request */

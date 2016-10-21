@@ -137,6 +137,22 @@ struct msm_vidc_mastering_display_colour_sei_payload {
 	unsigned int nMinDisplayMasteringLuminance;
 };
 
+struct msm_vidc_vpx_colorspace_payload {
+	unsigned int color_space;
+	unsigned int yuv_range_flag;
+	unsigned int sumsampling_x;
+	unsigned int sumsampling_y;
+};
+
+struct msm_vidc_mastering_display_colour_sei_payload {
+	unsigned int nDisplayPrimariesX[3];
+	unsigned int nDisplayPrimariesY[3];
+	unsigned int nWhitePointX;
+	unsigned int nWhitePointY;
+	unsigned int nMaxDisplayMasteringLuminance;
+	unsigned int nMinDisplayMasteringLuminance;
+};
+
 struct msm_vidc_content_light_level_sei_payload {
 	unsigned int nMaxContentLight;
 	unsigned int nMaxPicAverageLight;
@@ -158,6 +174,8 @@ struct msm_vidc_vui_display_info_payload {
 	unsigned int chroma_sample_loc_type_top_field;
 	unsigned int chroma_sample_loc_type_bottom_field;
 };
+
+
 enum msm_vidc_extradata_type {
 	MSM_VIDC_EXTRADATA_NONE = 0x00000000,
 	MSM_VIDC_EXTRADATA_MB_QUANTIZATION = 0x00000001,

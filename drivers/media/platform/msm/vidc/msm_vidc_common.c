@@ -55,6 +55,7 @@
 		((cmd) <= SESSION_MSG_END))
 #define IS_SYS_CMD_VALID(cmd) (((cmd) >= SYS_MSG_START) && \
 		((cmd) <= SYS_MSG_END))
+
 const char *const mpeg_video_vidc_extradata[] = {
 	"Extradata none",
 	"Extradata MB Quantization",
@@ -87,6 +88,7 @@ const char *const mpeg_video_vidc_extradata[] = {
 	"Extradata display VUI",
 	"Extradata vpx color space",
 };
+
 struct getprop_buf {
 	struct list_head list;
 	void *data;

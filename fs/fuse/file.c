@@ -58,6 +58,11 @@ struct fuse_file *fuse_file_alloc(struct fuse_conn *fc)
 	if (unlikely(!ff))
 		return NULL;
 
+	ff->rw_lower_file = NULL;
+	ff->shortcircuit_enabled = 0;
+	if (fc->shortcircuit_io)
+		ff->shortcircuit_enabled = 1;
+
 	ff->fc = fc;
 	ff->reserved_req = fuse_request_alloc(0);
 	if (unlikely(!ff->reserved_req)) {
@@ -895,7 +900,12 @@ static ssize_t fuse_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 			return err;
 	}
 
-	return generic_file_aio_read(iocb, iov, nr_segs, pos);
+	if (ff && ff->shortcircuit_enabled && ff->rw_lower_file)
+		ret_val = fuse_shortcircuit_aio_read(iocb, iov, nr_segs, pos);
+	else
+		ret_val = generic_file_aio_read(iocb, iov, nr_segs, pos);
+
+	return ret_val;
 }
 
 static void fuse_write_fill(struct fuse_req *req, struct fuse_file *ff,
@@ -1164,6 +1174,24 @@ static ssize_t fuse_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 	err = file_update_time(file);
 	if (err)
 		goto out;
+
+	if (ff && ff->shortcircuit_enabled && ff->rw_lower_file) {
+		/* Use iocb->ki_pos instead of pos to handle the cases of files
+		 * that are opened with O_APPEND. For example if multiple
+		 * processes open the same file with O_APPEND then the
+		 * iocb->ki_pos will not be equal to the new pos value that is
+		 * updated with the file size(to guarantee appends even when
+		 * the file has grown due to the writes by another process).
+		 * We should use iocb->pos here since the lower filesystem
+		 * is expected to adjust for O_APPEND anyway and may need to
+		 * adjust the size for the file changes that occur due to
+		 * some processes writing directly to the lower filesystem
+		 * without using fuse.
+		 */
+		written = fuse_shortcircuit_aio_write(iocb, iov, nr_segs,
+							iocb->ki_pos);
+		goto out;
+	}
 
 	if (file->f_flags & O_DIRECT) {
 		written = generic_file_direct_write(iocb, iov, &nr_segs,
@@ -1660,20 +1688,12 @@ static const struct vm_operations_struct fuse_file_vm_ops = {
 
 static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE)) {
-		struct inode *inode = file_inode(file);
-		struct fuse_conn *fc = get_fuse_conn(inode);
-		struct fuse_inode *fi = get_fuse_inode(inode);
-		struct fuse_file *ff = file->private_data;
-		/*
-		 * file may be written through mmap, so chain it onto the
-		 * inodes's write_file list
-		 */
-		spin_lock(&fc->lock);
-		if (list_empty(&ff->write_entry))
-			list_add(&ff->write_entry, &fi->write_files);
-		spin_unlock(&fc->lock);
-	}
+	struct fuse_file *ff = file->private_data;
+
+	ff->shortcircuit_enabled = 0;
+	if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))
+		fuse_link_write_file(file);
+
 	file_accessed(file);
 	vma->vm_ops = &fuse_file_vm_ops;
 	return 0;
@@ -1681,6 +1701,10 @@ static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 
 static int fuse_direct_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	struct fuse_file *ff = file->private_data;
+
+	ff->shortcircuit_enabled = 0;
+
 	/* Can't provide the coherency needed for MAP_SHARED */
 	if (vma->vm_flags & VM_MAYSHARE)
 		return -ENODEV;
