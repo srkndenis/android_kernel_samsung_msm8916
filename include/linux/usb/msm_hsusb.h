@@ -110,6 +110,7 @@ enum msm_usb_phy_type {
 
 #define IDEV_ACA_CHG_MAX	1500
 #define IDEV_ACA_CHG_LIMIT	500
+#define IDEV_HVDCP_CHG_MAX	1800
 
 /**
  * Different states involved in USB charger detection.
@@ -541,6 +542,16 @@ struct msm_otg {
 	bool pm_done;
 	struct qpnp_vadc_chip	*vadc_dev;
 	int ext_id_irq;
+	bool phy_irq_pending;
+	bool rm_pulldown;
+	wait_queue_head_t	host_suspend_wait;
+/* Maximum debug message length */
+#define DEBUG_MSG_LEN   128UL
+/* Maximum number of messages */
+#define DEBUG_MAX_MSG   256UL
+	unsigned int dbg_idx;
+	rwlock_t dbg_lock;
+	char (buf[DEBUG_MAX_MSG])[DEBUG_MSG_LEN];   /* buffer */
 };
 
 struct ci13xxx_platform_data {
