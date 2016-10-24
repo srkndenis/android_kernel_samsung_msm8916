@@ -2007,6 +2007,33 @@ int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 			__func__, open.endpoint_id_1, open.sample_rate,
 			open.topology_id);
 
+		if ((this_adm.ec_ref_cfg.channel != 0) && (path != 1) &&
+			(open.endpoint_id_2 != 0xFFFF)) {
+			int ref_end_channel_mode = this_adm.ec_ref_cfg.channel;
+			use_open_v6 = true;
+			/* overwrite open opcode and pkt size here to use
+			 * ADM_CMD_DEVICE_OPEN_V6
+			 */
+			open.hdr.opcode = ADM_CMD_DEVICE_OPEN_V6;
+			open.hdr.pkt_size = sizeof(open_v6);
+
+			open_v6.open = open;
+			open_v6.ref_end_num_channel = ref_end_channel_mode;
+			open_v6.ref_end_sample_rate =
+					this_adm.ec_ref_cfg.sample_rate;
+			open_v6.ref_end_bit_width =
+					this_adm.ec_ref_cfg.bit_width;
+			if (ref_end_channel_mode == 1)	{
+				open_v6.ref_end_channel_mapping[0] =
+							PCM_CHANNEL_FC;
+			} else if (ref_end_channel_mode == 2) {
+				open_v6.ref_end_channel_mapping[0] =
+							PCM_CHANNEL_FL;
+				open_v6.ref_end_channel_mapping[1] =
+							PCM_CHANNEL_FR;
+			}
+		}
+
 		atomic_set(&this_adm.copp.stat[port_idx][copp_idx], 0);
 
 		ret = apr_send_pkt(this_adm.apr, (uint32_t *)&open);
