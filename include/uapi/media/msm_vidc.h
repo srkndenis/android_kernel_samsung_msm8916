@@ -121,9 +121,6 @@ struct msm_vidc_s3d_frame_packing_payload {
 	unsigned int fpa_repetition_period;
 	unsigned int fpa_extension_flag;
 };
-
-<<<<<<< HEAD
-=======
 struct msm_vidc_vpx_colorspace_payload {
 	unsigned int color_space;
 	unsigned int yuv_range_flag;
@@ -161,8 +158,6 @@ struct msm_vidc_vui_display_info_payload {
 	unsigned int chroma_sample_loc_type_top_field;
 	unsigned int chroma_sample_loc_type_bottom_field;
 };
-
->>>>>>> e107b0f... msm: vidc: Add support for color space information.
 enum msm_vidc_extradata_type {
 	MSM_VIDC_EXTRADATA_NONE = 0x00000000,
 	MSM_VIDC_EXTRADATA_MB_QUANTIZATION = 0x00000001,
@@ -178,6 +173,12 @@ enum msm_vidc_extradata_type {
 	MSM_VIDC_EXTRADATA_STREAM_USERDATA = 0x0000000E,
 	MSM_VIDC_EXTRADATA_FRAME_QP = 0x0000000F,
 	MSM_VIDC_EXTRADATA_FRAME_BITS_INFO = 0x00000010,
+#define MSM_VIDC_EXTRADATA_MASTERING_DISPLAY_COLOUR_SEI \
+	MSM_VIDC_EXTRADATA_MASTERING_DISPLAY_COLOUR_SEI
+	MSM_VIDC_EXTRADATA_MASTERING_DISPLAY_COLOUR_SEI = 0x00000015,
+#define MSM_VIDC_EXTRADATA_CONTENT_LIGHT_LEVEL_SEI \
+	MSM_VIDC_EXTRADATA_CONTENT_LIGHT_LEVEL_SEI
+	MSM_VIDC_EXTRADATA_CONTENT_LIGHT_LEVEL_SEI = 0x00000016,
 	MSM_VIDC_EXTRADATA_INPUT_CROP = 0x0700000E,
 	MSM_VIDC_EXTRADATA_DIGITAL_ZOOM = 0x07000010,
 #define MSM_VIDC_EXTRADATA_VPX_COLORSPACE_INFO \

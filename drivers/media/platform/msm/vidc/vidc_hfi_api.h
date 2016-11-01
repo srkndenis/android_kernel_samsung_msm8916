@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -114,13 +114,10 @@ enum hal_extradata_id {
 	HAL_EXTRADATA_DIGITAL_ZOOM,
 	HAL_EXTRADATA_LTR_INFO,
 	HAL_EXTRADATA_METADATA_MBI,
-<<<<<<< HEAD
-=======
 	HAL_EXTRADATA_MASTERING_DISPLAY_COLOUR_SEI,
 	HAL_EXTRADATA_CONTENT_LIGHT_LEVEL_SEI,
 	HAL_EXTRADATA_VUI_DISPLAY_INFO,
 	HAL_EXTRADATA_VPX_COLORSPACE,
->>>>>>> e107b0f... msm: vidc: Add support for color space information.
 };
 
 enum hal_property {
@@ -133,6 +130,8 @@ enum hal_property {
 	HAL_PARAM_FRAME_SIZE,
 	HAL_CONFIG_REALTIME,
 	HAL_PARAM_BUFFER_COUNT_ACTUAL,
+	HAL_PARAM_BUFFER_SIZE_ACTUAL,
+	HAL_PARAM_BUFFER_DISPLAY_HOLD_COUNT_ACTUAL,
 	HAL_PARAM_NAL_STREAM_FORMAT_SELECT,
 	HAL_PARAM_VDEC_OUTPUT_ORDER,
 	HAL_PARAM_VDEC_PICTURE_TYPE_DECODE,
@@ -222,6 +221,7 @@ enum hal_property {
 	HAL_PARAM_VDEC_NON_SECURE_OUTPUT2,
 	HAL_PARAM_VENC_HIER_P_HYBRID_MODE,
 	HAL_PARAM_VENC_VIDEO_SIGNAL_INFO,
+	HAL_PARAM_VENC_CONSTRAINED_INTRA_PRED,
 };
 
 enum hal_domain {
@@ -245,6 +245,16 @@ enum hal_core_capabilities {
 	HAL_VIDEO_ENCODER_DEINTERLACE_CAPABILITY = 0x00000004,
 	HAL_VIDEO_DECODER_MULTI_STREAM_CAPABILITY = 0x00000008,
 	HAL_VIDEO_UNUSED_CAPABILITY      = 0x10000000,
+};
+
+enum hal_default_properties {
+	HAL_VIDEO_DYNAMIC_BUF_MODE = 0x00000001,
+	HAL_VIDEO_CONTINUE_DATA_TRANSFER = 0x00000002,
+};
+
+enum hal_hfi_version {
+	HAL_VIDEO_2X,
+	HAL_VIDEO_3X,
 };
 
 enum hal_video_codec {
@@ -573,6 +583,16 @@ struct hal_enable {
 struct hal_buffer_count_actual {
 	enum hal_buffer buffer_type;
 	u32 buffer_count_actual;
+};
+
+struct hal_buffer_size_actual {
+	enum hal_buffer buffer_type;
+	u32 buffer_size;
+};
+
+struct hal_buffer_display_hold_count_actual {
+	enum hal_buffer buffer_type;
+	u32 hold_count;
 };
 
 enum hal_nal_stream_format {
@@ -1000,6 +1020,14 @@ struct vidc_seq_hdr {
 	u32 seq_hdr_len;
 };
 
+struct hal_fw_info {
+	char version[128];
+	int base_addr;
+	int register_base;
+	int register_size;
+	int irq;
+};
+
 enum hal_flush {
 	HAL_FLUSH_INPUT,
 	HAL_FLUSH_OUTPUT,
@@ -1274,14 +1302,6 @@ enum msm_vidc_hfi_type {
 	VIDC_HFI_Q6,
 };
 
-enum fw_info {
-	FW_BASE_ADDRESS,
-	FW_REGISTER_BASE,
-	FW_REGISTER_SIZE,
-	FW_IRQ,
-	FW_INFO_MAX,
-};
-
 enum msm_vidc_thermal_level {
 	VIDC_THERMAL_NORMAL = 0,
 	VIDC_THERMAL_LOW,
@@ -1356,14 +1376,14 @@ struct hfi_device {
 	int (*session_get_property)(void *sess, enum hal_property ptype);
 	int (*scale_clocks)(void *dev, int load, int codecs_enabled);
 	int (*vote_bus)(void *dev, struct vidc_bus_vote_data *data,
-			int num_data, int requested_level);
+			int num_data);
 	int (*unvote_bus)(void *dev);
 	int (*iommu_get_domain_partition)(void *dev, u32 flags, u32 buffer_type,
 			int *domain_num, int *partition_num);
 	int (*load_fw)(void *dev);
 	void (*unload_fw)(void *dev);
 	int (*resurrect_fw)(void *dev);
-	int (*get_fw_info)(void *dev, enum fw_info info);
+	int (*get_fw_info)(void *dev, struct hal_fw_info *fw_info);
 	int (*get_stride_scanline)(int color_fmt, int width,
 		int height,	int *stride, int *scanlines);
 	int (*session_clean)(void *sess);
@@ -1371,6 +1391,8 @@ struct hfi_device {
 	int (*power_enable)(void *dev);
 	int (*suspend)(void *dev);
 	unsigned long (*get_core_clock_rate)(void *dev);
+	enum hal_default_properties (*get_default_properties)(void *dev);
+	enum hal_hfi_version (*get_version)(void *dev);
 };
 
 typedef void (*hfi_cmd_response_callback) (enum command_response cmd,
