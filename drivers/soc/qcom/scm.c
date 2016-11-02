@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -207,13 +207,6 @@ static u32 smc(u32 cmd_addr)
 
 	return r0;
 }
-
-#if defined(CONFIG_ARCH_MSM8916) || defined(CONFIG_ARCH_MSM8939) || defined(CONFIG_ARCH_MSM8226)
-static void __wrap_flush_cache_all(void* vp)
-{
-	flush_cache_all();
-}
-#endif
 
 static int __scm_call(const struct scm_command *cmd)
 {
@@ -674,25 +667,6 @@ int scm_call2(u32 fn_id, struct scm_desc *desc)
 
 		desc->ret[0] = desc->ret[1] = desc->ret[2] = 0;
 
-		pr_debug("scm_call: func id %#llx, args: %#x, %#llx, %#llx, %#llx, %#llx\n",
-			x0, desc->arginfo, desc->args[0], desc->args[1],
-			desc->args[2], desc->x5);
-#ifdef CONFIG_TIMA_LKMAUTH
-		if (call_from_ss_daemon || ( pid_from_lkm == current_thread_info()->task->pid)) {
-#else
-		if (call_from_ss_daemon) {
-#endif
-			flush_cache_all();
-
-#if defined(CONFIG_ARCH_MSM8916) || defined(CONFIG_ARCH_MSM8939) || defined(CONFIG_ARCH_MSM8226) || defined(CONFIG_ARCH_MSM8994)
-			smp_call_function((void (*)(void *))__wrap_flush_cache_all, NULL, 1);
-#endif
-
-#ifndef CONFIG_ARM64
-			outer_flush_all();
-#endif
-		}
-
 		if (scm_version == SCM_ARMV8_64)
 			ret = __scm_call_armv8_64(x0, desc->arginfo,
 						  desc->args[0], desc->args[1],
@@ -712,10 +686,8 @@ int scm_call2(u32 fn_id, struct scm_desc *desc)
 	}  while (ret == SCM_V2_EBUSY && (retry_count++ < SCM_EBUSY_MAX_RETRY));
 
 	if (ret < 0)
-		pr_err("scm_call failed: func id %#llx, arginfo: %#x, args: %#llx, %#llx, %#llx, %#llx, ret: %d, syscall returns: %#llx, %#llx, %#llx\n",
-			x0, desc->arginfo, desc->args[0], desc->args[1],
-			desc->args[2], desc->x5, ret, desc->ret[0],
-			desc->ret[1], desc->ret[2]);
+		pr_err("scm_call failed: func id %#llx, ret: %d, syscall returns: %#llx, %#llx, %#llx\n",
+			x0, ret, desc->ret[0], desc->ret[1], desc->ret[2]);
 
 	if (arglen > N_REGISTER_ARGS)
 		kfree(desc->extra_arg_buf);
