@@ -941,6 +941,86 @@ int mdp3_dynamic_clock_gating_ctrl(int enable)
 		VBIF_REG_WRITE(MDP3_VBIF_REG_FORCE_EN, 0x3);
 	}
 
+	rc = mdp3_clk_enable(0, 0);
+	if (rc)
+		pr_warn("fail to turn off MDP core clks\n");
+
+	return rc;
+}
+
+/**
+ * mdp3_get_panic_lut_cfg() - calculate panic and robust lut mask
+ * @panel_width: Panel width
+ *
+ * DMA buffer has 16 fill levels. Which needs to configured as safe
+ * and panic levels based on panel resolutions.
+ * No. of fill levels used = ((panel active width * 8) / 512).
+ * Roundoff the fill levels if needed.
+ * half of the total fill levels used will be treated as panic levels.
+ * Roundoff panic levels if total used fill levels are odd.
+ *
+ * Sample calculation for 720p display:
+ * Fill levels used = (720 * 8) / 512 = 12.5 after round off 13.
+ * panic levels = 13 / 2 = 6.5 after roundoff 7.
+ * Panic mask = 0x3FFF (2 bits per level)
+ * Robust mask = 0xFF80 (1 bit per level)
+ */
+u64 mdp3_get_panic_lut_cfg(u32 panel_width)
+{
+	u32 fill_levels = (((panel_width * 8) / 512) + 1);
+	u32 panic_mask = 0;
+	u32 robust_mask = 0;
+	u32 i = 0;
+	u64 panic_config = 0;
+	u32 panic_levels = 0;
+
+	panic_levels = fill_levels / 2;
+	if (fill_levels % 2)
+		panic_levels++;
+
+	for (i = 0; i < panic_levels; i++) {
+		panic_mask |= (BIT((i * 2) + 1) | BIT(i * 2));
+		robust_mask |= BIT(i);
+	}
+	panic_config = ~robust_mask;
+	panic_config = panic_config << 32;
+	panic_config |= panic_mask;
+	return panic_config;
+}
+
+int mdp3_qos_remapper_setup(struct mdss_panel_data *panel)
+{
+	int rc = 0;
+	u64 panic_config = 0;
+
+        if (!panel)
+                return -EINVAL;
+
+	panic_config = mdp3_get_panic_lut_cfg(panel->panel_info.xres);
+
+	rc = mdp3_clk_update(MDP3_CLK_AHB, 1);
+	rc |= mdp3_clk_update(MDP3_CLK_AXI, 1);
+	rc |= mdp3_clk_update(MDP3_CLK_MDP_CORE, 1);
+	if (rc) {
+		pr_err("fail to turn on MDP core clks\n");
+		return rc;
+	}
+	/* Program MDP QOS Remapper */
+	MDP3_REG_WRITE(MDP3_DMA_P_QOS_REMAPPER, 0x1A9);
+	MDP3_REG_WRITE(MDP3_DMA_P_WATERMARK_0, 0x0);
+	MDP3_REG_WRITE(MDP3_DMA_P_WATERMARK_1, 0x0);
+	MDP3_REG_WRITE(MDP3_DMA_P_WATERMARK_2, 0x0);
+	/* PANIC setting depends on panel width*/
+	MDP3_REG_WRITE(MDP3_PANIC_LUT0,	(panic_config & 0xFFFF));
+	MDP3_REG_WRITE(MDP3_PANIC_LUT1, ((panic_config >> 16) & 0xFFFF));
+	MDP3_REG_WRITE(MDP3_ROBUST_LUT, ((panic_config >> 32) & 0xFFFF));
+	MDP3_REG_WRITE(MDP3_PANIC_ROBUST_CTRL, 0x1);
+	pr_debug("Panel width %d Panic Lut0 %x Lut1 %x Robust %x\n",
+		panel->panel_info.xres,
+		MDP3_REG_READ(MDP3_PANIC_LUT0),
+		MDP3_REG_READ(MDP3_PANIC_LUT1),
+		MDP3_REG_READ(MDP3_ROBUST_LUT));
+
 	rc = mdp3_clk_update(MDP3_CLK_AHB, 0);
 	rc |= mdp3_clk_update(MDP3_CLK_AXI, 0);
 	rc |= mdp3_clk_update(MDP3_CLK_MDP_CORE, 0);
