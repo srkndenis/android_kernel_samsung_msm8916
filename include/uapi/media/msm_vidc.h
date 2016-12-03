@@ -160,7 +160,6 @@ struct msm_vidc_vui_display_info_payload {
 	unsigned int chroma_sample_loc_type_bottom_field;
 };
 
-
 enum msm_vidc_extradata_type {
 	MSM_VIDC_EXTRADATA_NONE = 0x00000000,
 	MSM_VIDC_EXTRADATA_MB_QUANTIZATION = 0x00000001,

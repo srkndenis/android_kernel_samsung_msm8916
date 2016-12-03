@@ -660,7 +660,7 @@ static int mdss_fb_lpm_enable(struct msm_fb_data_type *mfd, int mode)
 	unlock_fb_info(mfd->fbi);
 
 	mutex_lock(&mfd->bl_lock);
-	mfd->bl_updated = true;
+	mfd->allow_bl_update = true;
 	mdss_fb_set_backlight(mfd, bl_lvl);
 	mutex_unlock(&mfd->bl_lock);
 
@@ -1166,8 +1166,11 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 		return;
 	}
 
-	if ((((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
-		|| !mfd->bl_updated) && !IS_CALIB_MODE_BL(mfd)) ||
+	if (
+#ifndef CONFIG_LEDS_TRIGGER_BACKLIGHT
+		(((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
+		|| !mfd->allow_bl_update) && !IS_CALIB_MODE_BL(mfd)) ||
+#endif
 		mfd->panel_info->cont_splash_enabled) {
 		mfd->unset_bl_level = bkl_lvl;
 		return;
@@ -1214,7 +1217,7 @@ void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
 	if (!mfd->unset_bl_level)
 		return;
 	mutex_lock(&mfd->bl_lock);
-	if (!mfd->bl_updated) {
+	if (!mfd->allow_bl_update) {
 		pdata = dev_get_platdata(&mfd->pdev->dev);
 		if ((pdata) && (pdata->set_backlight)) {
 			mfd->bl_level = mfd->unset_bl_level;
@@ -1224,8 +1227,8 @@ void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
 								&bl_notify);
 			pdata->set_backlight(pdata, temp);
 			mfd->bl_level_scaled = mfd->unset_bl_level;
-			mfd->bl_updated = 1;
 			mdss_fb_bl_update_notify(mfd);
+			mfd->allow_bl_update = true;
 		}
 	}
 	mutex_unlock(&mfd->bl_lock);
@@ -1271,6 +1274,64 @@ static int mdss_fb_unblank_sub(struct msm_fb_data_type *mfd)
 	if (!mfd)
 		return -EINVAL;
 
+	if (!mdss_fb_is_power_on(mfd) || !mfd->mdp.off_fnc)
+		return 0;
+
+	cur_power_state = mfd->panel_power_state;
+
+	pr_debug("Transitioning from %d --> %d\n", cur_power_state,
+		req_power_state);
+
+	if (cur_power_state == req_power_state) {
+		pr_debug("No change in power state\n");
+		return 0;
+	}
+
+	mutex_lock(&mfd->update.lock);
+	mfd->update.type = NOTIFY_TYPE_SUSPEND;
+	mfd->update.is_suspend = 1;
+	mutex_unlock(&mfd->update.lock);
+	complete(&mfd->update.comp);
+	del_timer(&mfd->no_update.timer);
+	mfd->no_update.value = NOTIFY_TYPE_SUSPEND;
+	complete(&mfd->no_update.comp);
+
+	mfd->op_enable = false;
+	if (mdss_panel_is_power_off(req_power_state)) {
+		int current_bl = mfd->bl_level;
+		/* Stop Display thread */
+		if (mfd->disp_thread)
+			mdss_fb_stop_disp_thread(mfd);
+		mutex_lock(&mfd->bl_lock);
+		mdss_fb_set_backlight(mfd, 0);
+		mfd->allow_bl_update = false;
+		mfd->unset_bl_level = current_bl;
+		mutex_unlock(&mfd->bl_lock);
+	}
+	mfd->panel_power_state = req_power_state;
+
+	ret = mfd->mdp.off_fnc(mfd);
+	if (ret)
+		mfd->panel_power_state = cur_power_state;
+	else if (mdss_panel_is_power_off(req_power_state))
+		mdss_fb_release_fences(mfd);
+	mfd->op_enable = true;
+	complete(&mfd->power_off_comp);
+
+	return ret;
+}
+
+static int mdss_fb_blank_unblank(struct msm_fb_data_type *mfd)
+{
+	int ret = 0;
+	int cur_power_state;
+
+	if (!mfd)
+		return -EINVAL;
+
+	if (mfd->panel_info->debugfs_info)
+		mdss_panel_validate_debugfs_info(mfd);
+
 	/* Start Display thread */
 	if (mfd->disp_thread == NULL) {
 		ret = mdss_fb_start_disp_thread(mfd);
@@ -1303,9 +1364,26 @@ static int mdss_fb_unblank_sub(struct msm_fb_data_type *mfd)
 	/* Reset the backlight only if the panel was off */
 	if (mdss_panel_is_power_off(cur_power_state)) {
 		mutex_lock(&mfd->bl_lock);
-		if (!mfd->bl_updated) {
-			mfd->bl_updated = 1;
-			mdss_fb_set_backlight(mfd, mfd->unset_bl_level);
+		if (!mfd->allow_bl_update) {
+			mfd->allow_bl_update = true;
+			/*
+			 * If in AD calibration mode then frameworks would not
+			 * be allowed to update backlight hence post unblank
+			 * the backlight would remain 0 (0 is set in blank).
+			 * Hence resetting back to calibration mode value
+			 */
+			if (IS_CALIB_MODE_BL(mfd))
+				mdss_fb_set_backlight(mfd, mfd->calib_mode_bl);
+			else if (!mfd->panel_info->mipi.post_init_delay)
+				mdss_fb_set_backlight(mfd, mfd->unset_bl_level);
+
+			/*
+			 * it blocks the backlight update between unblank and
+			 * first kickoff to avoid backlight turn on before black
+			 * frame is transferred to panel through unblank call.
+			 */
+			mfd->allow_bl_update = false;
+>>>>>>> e8013de... Merge remote-tracking branch 'caf/LA.BR.1.2.9_rb1.9' into cm-14.1
 		}
 		mutex_unlock(&mfd->bl_lock);
 	}

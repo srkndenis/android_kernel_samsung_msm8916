@@ -228,6 +228,9 @@ enum power_supply_type {
 	POWER_SUPPLY_TYPE_HV_UNKNOWN,		/* Adaptive Charger Unknown (26) */
 	POWER_SUPPLY_TYPE_HV_MAINS,			/* Adaptive Charger (27) */
 	POWER_SUPPLY_TYPE_MDOCK_TA,			   /* MMdock charger (28) */
+#ifdef CONFIG_MACH_YULONG
+	POWER_SUPPLY_TYPE_YL_BATTERY,	/* yulong add for yl_adc_battery */
+#endif
 	POWER_SUPPLY_TYPE_USB_PARALLEL,		/* USB Parallel Path */
 	POWER_SUPPLY_TYPE_MAX,
 };

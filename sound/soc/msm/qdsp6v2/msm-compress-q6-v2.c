@@ -662,6 +662,19 @@ static int msm_compr_send_media_format_block(struct snd_compr_stream *cstream,
 	bool use_default_chmap = true;
 	char *chmap = NULL;
 
+	pr_debug("%s: use_gapless_codec_options %d\n",
+			__func__, use_gapless_codec_options);
+
+	if (use_gapless_codec_options)
+		codec_options = &(prtd->gapless_state.codec_options);
+	else
+		codec_options = &(prtd->codec_param.codec.options);
+
+	if (!codec_options) {
+		pr_err("%s: codec_options is NULL\n", __func__);
+		return -EINVAL;
+	}
+
 	switch (prtd->codec) {
 	case FORMAT_LINEAR_PCM:
 		pr_debug("SND_AUDIOCODEC_PCM\n");
@@ -2657,6 +2670,16 @@ static int msm_compr_app_type_cfg_info(struct snd_kcontrol *kcontrol,
 {
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
 	uinfo->count = 5;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = 0xFFFFFFFF;
+	return 0;
+}
+
+static int msm_compr_channel_map_info(struct snd_kcontrol *kcontrol,
+				      struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	uinfo->count = 8;
 	uinfo->value.integer.min = 0;
 	uinfo->value.integer.max = 0xFFFFFFFF;
 	return 0;

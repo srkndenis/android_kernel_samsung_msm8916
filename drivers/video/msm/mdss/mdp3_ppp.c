@@ -354,26 +354,132 @@ u32 mdp3_clk_calc(struct msm_fb_data_type *mfd, struct blit_req_list *lreq)
 int mdp3_ppp_vote_update(struct msm_fb_data_type *mfd)
 {
 	struct mdss_panel_info *panel_info = mfd->panel_info;
-	uint64_t req_bw = 0, ab = 0, ib = 0;
-	int rc = 0;
-	if (!ppp_stat->bw_on)
-		pr_err("%s: PPP vote update in wrong state\n", __func__);
+	int i, lcount = 0;
+	struct mdp_blit_req *req;
+	struct bpp_info bpp;
+	u64 old_solid_fill_pixel = 0;
+	u64 new_solid_fill_pixel = 0;
+	u64 src_read_bw = 0;
+	u32 bg_read_bw = 0;
+	u32 dst_write_bw = 0;
+	u64 honest_ppp_ab = 0;
+	u32 fps = 0;
+	int smart_blit_fg_indx = -1;
+	u32 smart_blit_bg_read_bw = 0;
 
-	req_bw = panel_info->xres * panel_info->yres *
-		panel_info->mipi.frame_rate *
-		MDP_PPP_MAX_BPP *
-		MDP_PPP_DYNAMIC_FACTOR *
-		MDP_PPP_MAX_READ_WRITE;
-	ib = (req_bw * 3) / 2;
+	ATRACE_BEGIN(__func__);
+	lcount = lreq->count;
+	if (lcount == 0) {
+		pr_err("Blit with request count 0, continue to recover!!!\n");
+		ATRACE_END(__func__);
+		return 0;
+	}
+	if (lreq->req_list[0].flags & MDP_SOLID_FILL) {
+		req = &(lreq->req_list[0]);
+		mdp3_get_bpp_info(req->dst.format, &bpp);
+		old_solid_fill_pixel = ppp_res.solid_fill_pixel;
+		new_solid_fill_pixel = req->dst_rect.w * req->dst_rect.h;
+		ppp_res.solid_fill_pixel += new_solid_fill_pixel;
+		ppp_res.solid_fill_byte += req->dst_rect.w * req->dst_rect.h *
+						bpp.bpp_num / bpp.bpp_den;
+		if ((old_solid_fill_pixel >= new_solid_fill_pixel) ||
+			(mdp3_res->solid_fill_vote_en)) {
+			pr_debug("Last fill pixels are higher or fill_en %d\n",
+				mdp3_res->solid_fill_vote_en);
+			ATRACE_END(__func__);
+			return 0;
+		}
+	}
 
-	if (ppp_stat->bw_optimal)
-		ab = ib / 2;
-	else
-		ab = req_bw;
-	rc = mdp3_bus_scale_set_quota(MDP3_CLIENT_PPP, ab, ib);
-	if (rc < 0) {
-		pr_err("%s: scale_set_quota failed\n", __func__);
-		return rc;
+	for (i = 0; i < lcount; i++) {
+		/* Set Smart blit flag before BW calculation */
+		is_blit_optimization_possible(lreq, i);
+		req = &(lreq->req_list[i]);
+
+		if (req->fps > 0 && req->fps <= panel_info->mipi.frame_rate) {
+			if (fps == 0)
+				fps = req->fps;
+			else
+				fps = panel_info->mipi.frame_rate;
+		}
+		if (!(check_if_rgb(req->src.format))) {
+			/* Set max fps if video is not full screen */
+			if((req->dst_rect.w < panel_info->xres) ||
+				( req->dst_rect.h < panel_info->yres))
+				fps = panel_info->mipi.frame_rate;
+		}
+		mdp3_get_bpp_info(req->src.format, &bpp);
+		if (lreq->req_list[i].flags & MDP_SMART_BLIT) {
+			/*
+			 * Flag for smart blit FG layer index
+			 * If blit request at index "n" has
+			 * MDP_SMART_BLIT flag set then it will be used as BG
+			 * layer in smart blit and request at index "n+1"
+			 * will be used as FG layer
+			 */
+			smart_blit_fg_indx = i + 1;
+			bg_read_bw = req->src_rect.w * req->src_rect.h *
+						bpp.bpp_num / bpp.bpp_den;
+			bg_read_bw = mdp3_adjust_scale_factor(req,
+						bg_read_bw, bpp.bpp_pln);
+			/* Cache read BW of smart blit BG layer */
+			smart_blit_bg_read_bw = bg_read_bw;
+		} else {
+			src_read_bw = req->src_rect.w * req->src_rect.h *
+						bpp.bpp_num / bpp.bpp_den;
+			src_read_bw = mdp3_adjust_scale_factor(req,
+						src_read_bw, bpp.bpp_pln);
+			if (!(check_if_rgb(req->src.format))) {
+				src_read_bw = fudge_factor(src_read_bw,
+						YUV_BW_FUDGE_NUM,
+						YUV_BW_FUDGE_DEN);
+			}
+			mdp3_get_bpp_info(req->dst.format, &bpp);
+
+			if (smart_blit_fg_indx == i) {
+				bg_read_bw = smart_blit_bg_read_bw;
+				smart_blit_fg_indx = -1;
+			} else {
+				if ((req->transp_mask != MDP_TRANSP_NOP) ||
+					(req->alpha < MDP_ALPHA_NOP) ||
+					(req->src.format == MDP_ARGB_8888) ||
+					(req->src.format == MDP_BGRA_8888) ||
+					(req->src.format == MDP_RGBA_8888)) {
+					bg_read_bw = req->dst_rect.w * req->dst_rect.h *
+								bpp.bpp_num / bpp.bpp_den;
+					bg_read_bw = mdp3_adjust_scale_factor(req,
+								bg_read_bw, bpp.bpp_pln);
+				} else {
+					bg_read_bw = 0;
+				}
+			}
+			dst_write_bw = req->dst_rect.w * req->dst_rect.h *
+						bpp.bpp_num / bpp.bpp_den;
+			honest_ppp_ab += (src_read_bw + bg_read_bw + dst_write_bw);
+                }
+	}
+
+	if (fps == 0)
+		fps = panel_info->mipi.frame_rate;
+
+	if (lreq->req_list[0].flags & MDP_SOLID_FILL) {
+		honest_ppp_ab = ppp_res.solid_fill_byte * 4;
+		pr_debug("solid fill honest_ppp_ab %llu\n", honest_ppp_ab);
+	} else {
+	honest_ppp_ab += ppp_res.solid_fill_byte;
+	mdp3_res->solid_fill_vote_en = true;
+        }
+
+	honest_ppp_ab = honest_ppp_ab * fps;
+	if (honest_ppp_ab != ppp_res.next_ab) {
+		ppp_res.next_ab = honest_ppp_ab;
+		ppp_res.next_ib = honest_ppp_ab;
+		ppp_stat->bw_update = true;
+		pr_debug("solid fill ab = %llx, total ab = %llx (%d fps) Solid_fill_vote %d\n",
+			(ppp_res.solid_fill_byte * fps), honest_ppp_ab, fps,
+			mdp3_res->solid_fill_vote_en);
+		ATRACE_INT("mdp3_ppp_bus_quota", honest_ppp_ab);
+>>>>>>> e8013de... Merge remote-tracking branch 'caf/LA.BR.1.2.9_rb1.9' into cm-14.1
 	}
 	return rc;
 }
