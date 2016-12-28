@@ -80,6 +80,7 @@ struct adm_ctl {
 
 	int set_custom_topology;
 	int ec_ref_rx;
+	struct route_ec_ref_cfg ec_ref_cfg;
 };
 
 static struct adm_ctl			this_adm;
@@ -1802,10 +1803,13 @@ fail_cmd:
 int adm_open(int port_id, int path, int rate, int channel_mode, int topology,
 	     int perf_mode, uint16_t bit_width, int app_type, int acdb_id)
 {
+
 	struct adm_cmd_device_open_v5	open;
+        struct adm_cmd_device_open_v6   open_v6;
 	int ret = 0;
 	int port_idx, copp_idx, flags;
 	int tmp_port = q6audio_get_port_id(port_id);
+	bool use_open_v6 = false;
 
 	pr_debug("%s:port %#x path:%d rate:%d mode:%d perf_mode:%d,topo_id %d\n",
 		 __func__, port_id, path, rate, channel_mode, perf_mode,

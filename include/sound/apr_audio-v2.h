@@ -84,6 +84,7 @@ struct adm_cmd_matrix_map_routings_v5 {
 *	COPP ID.
 */
 #define ADM_CMD_DEVICE_OPEN_V5                          0x00010326
+#define ADM_CMD_DEVICE_OPEN_V6                          0x00010356
 
 /* Definition for a low latency stream session. */
 #define ADM_LOW_LATENCY_DEVICE_SESSION			0x2000
@@ -236,6 +237,43 @@ struct adm_cmd_device_open_v5 {
  * is set to zero and is ignored.
  */
 } __packed;
+
+/*  ADM device open command payload of the
+ *  #ADM_CMD_DEVICE_OPEN_V6 command.
+ */
+struct adm_cmd_device_open_v6 {
+	struct adm_cmd_device_open_v5 open;
+
+	u16                  ref_end_num_channel;
+/* Number of channels in the data expected at the reference end point
+ * for the voice processing Tx block.
+ * Supported values: 1, 2.
+ * Not applicable and ignored for audio COPP, compressed usecase.
+ */
+
+	u16                  ref_end_bit_width;
+/* bit width(in bits) in the data expected at the reference end point
+ * for the voice processing Tx block.
+ * Supported values: 16bits.
+ * Not applicable and ignored for audio COPP, compressed usecase.
+ */
+
+	u32                  ref_end_sample_rate;
+/* Sampling rate of the data expected at the reference end point
+ * for the voice processing Tx block.
+ * Supported values for voice processor Tx: 8000, 16000, 48000 Hz
+ * Not applicable and ignored for audio COPP, compressed usecase.
+ */
+
+	u8                   ref_end_channel_mapping[8];
+/* Array of channel mapping of buffers that the audio COPP that is expected
+ * at the reference end point for the voice processing Tx block.
+ * Channel[i] mapping describes channel I inside the buffer,
+ * where 0 < i < ref_end_num_channel.
+ * Not applicable and ignored for audio COPP, compressed usecase.
+ */
+} __packed;
+
 
 /*
  *	This command allows the client to close a COPP and disconnect
