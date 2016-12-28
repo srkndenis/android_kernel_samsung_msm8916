@@ -226,232 +226,6 @@ static int msm_cpe_afe_port_cntl(
 	return rc;
 }
 
-static int msm_cpe_lsm_lab_stop(struct snd_pcm_substream *substream)
-{
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct cpe_lsm_data *lsm_d = cpe_get_lsm_data(substream);
-	struct cpe_priv *cpe = cpe_get_private_data(substream);
-	struct wcd_cpe_lsm_ops *lsm_ops;
-	struct wcd_cpe_afe_ops *afe_ops;
-	struct cpe_lsm_session *session;
-	struct cpe_lsm_lab *lab_d = &lsm_d->lab;
-	struct msm_slim_dma_data *dma_data = NULL;
-	int rc;
-
-	/*
-	 * the caller is not aware of LAB status and will
-	 * try to stop lab even if it is already stopped.
-	 * return success right away is LAB is already stopped
-	 */
-	if (lab_d->thread_status == MSM_LSM_LAB_THREAD_STOP) {
-		dev_dbg(rtd->dev,
-			"%s: lab already stopped\n",
-			__func__);
-		return 0;
-	}
-
-	if (!cpe || !cpe->core_handle) {
-		dev_err(rtd->dev,
-			"%s: Invalid private data\n",
-			__func__);
-		return -EINVAL;
-	}
-
-	if (!lsm_d->lsm_session) {
-		dev_err(rtd->dev,
-			"%s: Invalid session data\n",
-			__func__);
-		return -EINVAL;
-	}
-
-	lsm_ops = &cpe->lsm_ops;
-	afe_ops = &cpe->afe_ops;
-	session = lsm_d->lsm_session;
-	if (rtd->cpu_dai)
-		dma_data = snd_soc_dai_get_dma_data(rtd->cpu_dai,
-					substream);
-	if (!dma_data || !dma_data->dai_channel_ctl) {
-		dev_err(rtd->dev,
-			"%s: dma_data is not set\n",
-			__func__);
-		return -EINVAL;
-	}
-
-	if (lab_d->thread_status == MSM_LSM_LAB_THREAD_RUNNING) {
-		dev_dbg(rtd->dev, "%s: stopping lab thread\n",
-			__func__);
-		rc = kthread_stop(session->lsm_lab_thread);
-
-		/*
-		 * kthread_stop returns EINTR if the thread_fn
-		 * was not scheduled before calling kthread_stop.
-		 * In this case, we dont need to wait for lab
-		 * thread to complete as lab thread will not be
-		 * scheduled at all.
-		 */
-		if (rc == -EINTR)
-			goto done;
-
-		/* Wait for the lab thread to exit */
-		rc = wait_for_completion_timeout(
-				&lab_d->thread_complete,
-				MSM_CPE_LAB_THREAD_TIMEOUT);
-		if (!rc) {
-			dev_err(rtd->dev,
-				"%s: Wait for lab thread timedout\n",
-				__func__);
-			return -ETIMEDOUT;
-		}
-	}
-
-	rc = lsm_ops->lab_ch_setup(cpe->core_handle,
-				   session,
-				   WCD_CPE_PRE_DISABLE);
-	if (rc)
-		dev_err(rtd->dev,
-			"%s: PRE ch teardown failed, err = %d\n",
-			__func__, rc);
-	/* continue with teardown even if any intermediate step fails */
-	rc = dma_data->dai_channel_ctl(dma_data, rtd->cpu_dai, false);
-	if (rc)
-		dev_err(rtd->dev,
-			"%s: open data failed %d\n", __func__, rc);
-	dma_data->ph = 0;
-
-	/*
-	 * Even though LAB stop failed,
-	 * output AFE port needs to be stopped
-	 */
-	rc = afe_ops->afe_port_stop(cpe->core_handle,
-				    &session->afe_out_port_cfg);
-	if (rc)
-		dev_err(rtd->dev,
-			"%s: AFE out port stop failed, err = %d\n",
-			__func__, rc);
-
-	rc = lsm_ops->lab_ch_setup(cpe->core_handle,
-				   session,
-				   WCD_CPE_POST_DISABLE);
-	if (rc)
-		dev_err(rtd->dev,
-			"%s: POST ch teardown failed, err = %d\n",
-			__func__, rc);
-done:
-	lab_d->thread_status = MSM_LSM_LAB_THREAD_STOP;
-	lab_d->buf_idx = 0;
-	atomic_set(&lab_d->in_count, 0);
-	lab_d->dma_write = 0;
-
-	return 0;
-}
-
-static int msm_cpe_lab_buf_alloc(struct snd_pcm_substream *substream,
-		struct cpe_lsm_session *session,
-		struct msm_slim_dma_data *dma_data)
-{
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct cpe_lsm_data *lsm_d = cpe_get_lsm_data(substream);
-	struct cpe_lsm_lab *lab_d = &lsm_d->lab;
-	struct cpe_hw_params *hw_params = &lsm_d->hw_params;
-	struct cpe_data_pcm_buf *pcm_buf = NULL;
-	int rc = 0;
-	int dma_alloc = 0;
-	u32 count = 0;
-	u32 bufsz, bufcnt;
-
-	bufsz = hw_params->buf_sz;
-	bufcnt = hw_params->period_count;
-
-	dev_dbg(rtd->dev,
-		"%s:Buf Size %d Buf count %d\n",
-		 __func__,
-		bufsz, bufcnt);
-
-	pcm_buf = kzalloc(((sizeof(struct cpe_data_pcm_buf)) * bufcnt),
-			  GFP_KERNEL);
-	if (!pcm_buf) {
-		dev_err(rtd->dev,
-			"%s: No memory for pcm_buf\n", __func__);
-		rc = -ENOMEM;
-		goto exit;
-	}
-
-	lab_d->pcm_buf = pcm_buf;
-	dma_alloc = bufsz * bufcnt;
-	pcm_buf->mem = NULL;
-	pcm_buf->mem = dma_alloc_coherent(dma_data->sdev->dev.parent,
-					  dma_alloc,
-					  &(pcm_buf->phys),
-					  GFP_KERNEL);
-	if (!pcm_buf->mem) {
-		dev_err(rtd->dev,
-			"%s:DMA alloc failed size = %x\n",
-			__func__, dma_alloc);
-		rc = -ENOMEM;
-		goto fail;
-	}
-
-	count = 0;
-	while (count < bufcnt) {
-		pcm_buf[count].mem = pcm_buf[0].mem + (count * bufsz);
-		pcm_buf[count].phys = pcm_buf[0].phys + (count * bufsz);
-		dev_dbg(rtd->dev,
-			"%s: pcm_buf[%d].mem %pK pcm_buf[%d].phys %pK\n",
-			 __func__, count,
-			(void *)pcm_buf[count].mem,
-			count, &(pcm_buf[count].phys));
-		count++;
-	}
-
-	return 0;
-fail:
-	if (pcm_buf) {
-		if (pcm_buf->mem)
-			dma_free_coherent(dma_data->sdev->dev.parent, dma_alloc,
-					  pcm_buf->mem, pcm_buf->phys);
-		kfree(pcm_buf);
-		lab_d->pcm_buf = NULL;
-	}
-exit:
-	return rc;
-}
-
-static int msm_cpe_lab_buf_dealloc(struct snd_pcm_substream *substream,
-	struct cpe_lsm_session *session, struct msm_slim_dma_data *dma_data)
-{
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct cpe_lsm_data *lsm_d = cpe_get_lsm_data(substream);
-	struct cpe_lsm_lab *lab_d = &lsm_d->lab;
-	struct cpe_hw_params *hw_params = &lsm_d->hw_params;
-	int rc = 0;
-	int dma_alloc = 0;
-	struct cpe_data_pcm_buf *pcm_buf = NULL;
-	int bufsz, bufcnt;
-
-	bufsz = hw_params->buf_sz;
-	bufcnt = hw_params->period_count;
-
-	dev_dbg(rtd->dev,
-		"%s:Buf Size %d Buf count %d\n", __func__,
-		bufsz, bufcnt);
-
-	if (bufcnt <= 0 || bufsz <= 0) {
-		dev_err(rtd->dev,
-			"%s: Invalid params, bufsz = %u, bufcnt = %u\n",
-			__func__, bufsz, bufcnt);
-		return -EINVAL;
-	}
-
-	pcm_buf = lab_d->pcm_buf;
-	dma_alloc = bufsz * bufcnt;
-	if (dma_data && pcm_buf)
-		dma_free_coherent(dma_data->sdev->dev.parent, dma_alloc,
-				  pcm_buf->mem, pcm_buf->phys);
-	kfree(pcm_buf);
-	lab_d->pcm_buf = NULL;
-	return rc;
-}
-
 /*
  * msm_cpe_lab_thread: Initiated on KW detection
  * @data: lab data
@@ -541,9 +315,8 @@ static int msm_cpe_lab_thread(void *data)
 				next_buf = &lab->pcm_buf[buf_count + 1];
 				buf_count++;
 			}
-			dev_dbg(rtd->dev,
-				"%s: Cur buf = %pK Next Buf = %pK\n"
-				" buf count = 0x%x\n",
+			pr_debug("%s: Cur buf = %pa Next Buf = %pa\n"
+				 " buf count = 0x%x\n",
 				 __func__, cur_buf, next_buf, buf_count);
 		} else {
 			pr_err("%s: SB get status, invalid len = 0x%x\n",
@@ -1147,7 +920,7 @@ static int msm_cpe_lsm_lab_start(struct snd_pcm_substream *substream,
 	struct wcd_cpe_lsm_ops *lsm_ops;
 
 	if (!substream || !substream->private_data) {
-		pr_err("%s: invalid substream (%pK)\n",
+		pr_err("%s: invalid substream (%p)\n",
 			__func__, substream);
 		return -EINVAL;
 	}
@@ -1204,7 +977,7 @@ static int msm_cpe_lsm_ioctl(struct snd_pcm_substream *substream,
 	struct wcd_cpe_lsm_ops *lsm_ops;
 
 	if (!substream || !substream->private_data) {
-		pr_err("%s: invalid substream (%pK)\n",
+		pr_err("%s: invalid substream (%p)\n",
 			__func__, substream);
 		return -EINVAL;
 	}
@@ -1356,7 +1129,7 @@ static int msm_cpe_lsm_ioctl_compat(struct snd_pcm_substream *substream,
 	struct wcd_cpe_lsm_ops *lsm_ops;
 
 	if (!substream || !substream->private_data) {
-		pr_err("%s: invalid substream (%pK)\n",
+		pr_err("%s: invalid substream (%p)\n",
 			__func__, substream);
 		return -EINVAL;
 	}
@@ -1760,10 +1533,10 @@ static int msm_cpe_lsm_copy(struct snd_pcm_substream *substream, int a,
 		rc = -EAGAIN;
 		goto fail;
 	}
-	if (lab_d->buf_idx >= (lsm_d->hw_params.period_count))
-		lab_d->buf_idx = 0;
-	pcm_buf = (lab_d->pcm_buf[lab_d->buf_idx].mem);
-	pr_debug("%s: Buf IDX = 0x%x pcm_buf %pK\n",
+	if (lab_s->buf_idx >= (lab_s->hw_params.period_count))
+		lab_s->buf_idx = 0;
+	pcm_buf = (lab_s->pcm_buf[lab_s->buf_idx].mem);
+	pr_debug("%s: Buf IDX = 0x%x pcm_buf %pa\n",
 			__func__,
 			lab_s->buf_idx,
 			&(lab_s->pcm_buf[lab_s->buf_idx]));
