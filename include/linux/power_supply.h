@@ -206,6 +206,7 @@ enum power_supply_type {
 	POWER_SUPPLY_TYPE_USB_DCP,			/* Dedicated Charging Port (5) */
 	POWER_SUPPLY_TYPE_USB_CDP,			/* Charging Downstream Port (6) */
 	POWER_SUPPLY_TYPE_USB_ACA,			/* Accessory Charger Adapters (7) */
+	POWER_SUPPLY_TYPE_USB_HVDCP,                    /* High Voltage DCP */
 	POWER_SUPPLY_TYPE_BMS,				/* Battery Monitor System (8) */
 	POWER_SUPPLY_TYPE_MISC,				/* 9 */
 	POWER_SUPPLY_TYPE_WIRELESS,			/* 10 */

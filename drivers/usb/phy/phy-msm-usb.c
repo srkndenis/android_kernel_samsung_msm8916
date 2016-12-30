@@ -4209,6 +4209,28 @@ otg_get_prop_usbin_voltage_now(struct msm_otg *motg)
 	}
 }
 
+static void msm_otg_dbg_log_event(struct usb_phy *phy, char *event, int d1, int d2)
+{
+	struct msm_otg *motg = container_of(phy, struct msm_otg, phy);
+	unsigned long flags;
+	unsigned long long t;
+	unsigned long nanosec;
+
+	if (!enable_dbg_log)
+		return;
+
+	write_lock_irqsave(&motg->dbg_lock, flags);
+	t = cpu_clock(smp_processor_id());
+	nanosec = do_div(t, 1000000000)/1000;
+	scnprintf(motg->buf[motg->dbg_idx], DEBUG_MSG_LEN,
+			"[%5lu.%06lu]: %s :%d:%d",
+			(unsigned long)t, nanosec, event, d1, d2);
+
+	motg->dbg_idx++;
+	motg->dbg_idx = motg->dbg_idx % DEBUG_MAX_MSG;
+	write_unlock_irqrestore(&motg->dbg_lock, flags);
+}
+
 static int msm_otg_pmic_dp_dm(struct msm_otg *motg, int value)
 {
 	int ret = 0;
