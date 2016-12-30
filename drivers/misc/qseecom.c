@@ -1122,56 +1122,6 @@ static int __qseecom_listener_has_sent_rsp(struct qseecom_dev_handle *data)
 	return ret || data->abort;
 }
 
-static int __qseecom_qseos_fail_return_resp_tz(struct qseecom_dev_handle *data,
-					struct qseecom_command_scm_resp *resp,
-			struct qseecom_client_listener_data_irsp *send_data_rsp,
-			struct qseecom_registered_listener_list *ptr_svc,
-							uint32_t lstnr) {
-	int ret = 0;
-	send_data_rsp->status = QSEOS_RESULT_FAILURE;
-	qseecom.send_resp_flag = 0;
-	send_data_rsp->qsee_cmd_id = QSEOS_LISTENER_DATA_RSP_COMMAND;
-	send_data_rsp->listener_id = lstnr;
-
-	if (ptr_svc)
-		pr_warn("listener_id:%x, lstnr: %x\n",
-					ptr_svc->svc.listener_id, lstnr);
-
-	if (ptr_svc && ptr_svc->ihandle) {
-		ret = msm_ion_do_cache_op(qseecom.ion_clnt, ptr_svc->ihandle,
-					ptr_svc->sb_virt, ptr_svc->sb_length,
-					ION_IOC_CLEAN_INV_CACHES);
-		if (ret) {
-			pr_err("cache operation failed %d\n", ret);
-			return ret;
-		}
-	}
-	if (lstnr == RPMB_SERVICE) {
-		ret = __qseecom_enable_clk(CLK_QSEE);
-		if (ret)
-			return ret;
-	}
-
-	ret = qseecom_scm_call(SCM_SVC_TZSCHEDULER, 1, send_data_rsp,
-				sizeof(send_data_rsp), resp, sizeof(*resp));
-	if (ret) {
-		pr_err("scm_call() failed with err: %d (app_id = %d)\n",
-						ret, data->client.app_id);
-		if (lstnr == RPMB_SERVICE)
-			__qseecom_disable_clk(CLK_QSEE);
-		return ret;
-	}
-	if ((resp->result != QSEOS_RESULT_SUCCESS) &&
-			(resp->result != QSEOS_RESULT_INCOMPLETE)) {
-		pr_err("fail:resp res= %d,app_id = %d,lstr = %d\n",
-				resp->result, data->client.app_id, lstnr);
-		ret = -EINVAL;
-	}
-	if (lstnr == RPMB_SERVICE)
-		__qseecom_disable_clk(CLK_QSEE);
-	return ret;
-}
-
 static int __qseecom_process_incomplete_cmd(struct qseecom_dev_handle *data,
 					struct qseecom_command_scm_resp *resp)
 {
