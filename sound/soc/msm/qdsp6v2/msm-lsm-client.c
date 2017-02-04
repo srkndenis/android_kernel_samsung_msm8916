@@ -1348,3 +1348,4 @@ module_exit(msm_soc_platform_exit);
 MODULE_DESCRIPTION("LSM client platform driver");
 MODULE_DEVICE_TABLE(of, msm_lsm_client_dt_match);
 MODULE_LICENSE("GPL v2");
+

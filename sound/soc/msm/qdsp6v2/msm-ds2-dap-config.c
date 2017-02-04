@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
 * This program is free software; you can redistribute it and/or modify
 * it under the terms of the GNU General Public License version 2 and
 * only version 2 as published by the Free Software Foundation.
@@ -1606,10 +1606,6 @@ static int msm_ds2_dap_param_visualizer_control_get(u32 cmd, void *arg)
 		pr_err("%s: no device active\n", __func__);
 		goto end;
 	}
-
-	length = ds2_dap_params[cache_dev].params_val[DOLBY_PARAM_VCNB_OFFSET];
-	params_length = (2*length + DOLBY_VIS_PARAM_HEADER_SIZE) *
-							 sizeof(uint32_t);
 
 	visualizer_data = kzalloc(params_length, GFP_KERNEL);
 	if (!visualizer_data) {
