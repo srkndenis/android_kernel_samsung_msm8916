@@ -50,8 +50,9 @@
 #include <asm/mach-types.h>
 #include <linux/delay.h>
 
-#ifdef CONFIG_CPU_FREQ_LIMIT_USERSPACE
+#ifdef CONFIG_CPU_FREQ_LIMIT
 #include <linux/cpufreq.h>
+#include <linux/cpufreq_limit.h>
 #define TOUCH_BOOSTER_DVFS
 #define TSP_GLOVE_MODE
 #define TSP_SVIEW_COVER_MODE
@@ -469,7 +470,9 @@ struct mms_ts_info {
 	bool ta_status;
 	bool noise_mode;
 	bool threewave_mode;
+#ifdef TSP_GLOVE_MODE
 	bool glove_mode;
+#endif
 
 #ifdef TSP_SVIEW_COVER_MODE
 	u8 cover_mode_retry;
@@ -651,7 +654,6 @@ struct tsp_cmd tsp_cmds[] = {
 static void ghost_touch_check(struct work_struct *work);
 struct delayed_work * p_ghost_check;
 #endif
-
 
 #ifdef TOUCH_BOOSTER_DVFS
 static void samsung_change_dvfs_lock(struct work_struct *work)
