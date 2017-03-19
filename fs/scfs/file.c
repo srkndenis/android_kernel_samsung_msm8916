@@ -167,7 +167,7 @@ static int scfs_readdir(struct file *file, void *dirent, filldir_t filldir)
 
 	lower_file = scfs_lower_file(file);
 	lower_file->f_pos = file->f_pos;
-	ret = vfs_readdir(lower_file, filldir, dirent);
+	ret = iterate_dir(lower_file, dirent);
 	file->f_pos = lower_file->f_pos;
 	if (ret >= 0)
 		fsstack_copy_attr_atime(dentry->d_inode, lower_file->f_path.dentry->d_inode);
