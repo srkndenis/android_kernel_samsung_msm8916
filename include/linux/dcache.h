@@ -120,6 +120,8 @@ struct dentry {
 	void *d_fsdata;			/* fs-specific data */
 
 	struct list_head d_lru;		/* LRU list */
+	struct list_head d_child;	/* child of parent list */
+
 	/*
 	 * d_child and d_rcu can share memory
 	 */
