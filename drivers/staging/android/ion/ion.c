@@ -3,7 +3,7 @@
  * drivers/gpu/ion/ion.c
  *
  * Copyright (C) 2011 Google, Inc.
- * Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2014,2017, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -113,6 +113,7 @@ struct ion_client {
  */
 struct ion_handle {
 	struct kref ref;
+	unsigned int user_ref_count;
 	struct ion_client *client;
 	struct ion_buffer *buffer;
 	struct rb_node node;
@@ -432,6 +433,17 @@ int ion_handle_put(struct ion_handle *handle)
 	return ret;
 }
 
+/* Must hold the client lock */
+static int user_ion_handle_put_nolock(struct ion_handle *handle)
+{
+	int ret;
+
+	if (--handle->user_ref_count == 0)
+		ret = ion_handle_put_nolock(handle);
+
+	return ret;
+}
+
 static struct ion_handle *ion_handle_lookup(struct ion_client *client,
 					    struct ion_buffer *buffer)
 {
@@ -633,7 +645,8 @@ struct ion_handle *ion_alloc(struct ion_client *client, size_t len,
 }
 EXPORT_SYMBOL(ion_alloc);
 
-static void ion_free_nolock(struct ion_client *client, struct ion_handle *handle)
+static void user_ion_free_nolock(struct ion_client *client,
+				 struct ion_handle *handle)
 {
 	bool valid_handle;
 
@@ -644,7 +657,11 @@ static void ion_free_nolock(struct ion_client *client, struct ion_handle *handle
 		WARN(1, "%s: invalid handle passed to free.\n", __func__);
 		return;
 	}
-	ion_handle_put_nolock(handle);
+	if (handle->user_ref_count == 0) {
+		WARN(1, "%s: User does not have access!\n", __func__);
+		return;
+	}
+	user_ion_handle_put_nolock(handle);
 }
 
 void ion_free(struct ion_client *client, struct ion_handle *handle)
@@ -652,7 +669,7 @@ void ion_free(struct ion_client *client, struct ion_handle *handle)
 	BUG_ON(client != handle->client);
 
 	mutex_lock(&client->lock);
-	ion_free_nolock(client, handle);
+	user_ion_free_nolock(client, handle);
 	mutex_unlock(&client->lock);
 }
 EXPORT_SYMBOL(ion_free);
@@ -1461,7 +1478,7 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			mutex_unlock(&client->lock);
 			return PTR_ERR(handle);
 		}
-		ion_free_nolock(client, handle);
+		user_ion_free_nolock(client, handle);
 		ion_handle_put_nolock(handle);
 		mutex_unlock(&client->lock);
 		break;

@@ -1081,6 +1081,153 @@ static long msm_actuator_subdev_ioctl(struct v4l2_subdev *sd,
 	}
 }
 
+#ifdef CONFIG_COMPAT
+static long msm_actuator_subdev_do_ioctl(
+	struct file *file, unsigned int cmd, void *arg)
+{
+	struct video_device *vdev = video_devdata(file);
+	struct v4l2_subdev *sd = vdev_to_v4l2_subdev(vdev);
+	struct msm_actuator_cfg_data32 *u32 =
+		(struct msm_actuator_cfg_data32 *)arg;
+	struct msm_actuator_cfg_data actuator_data;
+	void *parg = arg;
+	long rc;
+
+	switch (cmd) {
+	case VIDIOC_MSM_ACTUATOR_CFG32:
+		switch (u32->cfgtype) {
+		case CFG_SET_ACTUATOR_INFO:
+			actuator_data.cfgtype = u32->cfgtype;
+			actuator_data.is_af_supported = u32->is_af_supported;
+			actuator_data.cfg.set_info.actuator_params.act_type =
+				u32->cfg.set_info.actuator_params.act_type;
+
+			actuator_data.cfg.set_info.actuator_params
+				.reg_tbl_size =
+				u32->cfg.set_info.actuator_params.reg_tbl_size;
+
+			actuator_data.cfg.set_info.actuator_params.data_size =
+				u32->cfg.set_info.actuator_params.data_size;
+
+			actuator_data.cfg.set_info.actuator_params
+				.init_setting_size =
+				u32->cfg.set_info.actuator_params
+				.init_setting_size;
+
+			actuator_data.cfg.set_info.actuator_params.i2c_addr =
+				u32->cfg.set_info.actuator_params.i2c_addr;
+
+			actuator_data.cfg.set_info.actuator_params
+				.i2c_addr_type =
+				u32->cfg.set_info.actuator_params.i2c_addr_type;
+
+			actuator_data.cfg.set_info.actuator_params
+				.i2c_data_type =
+				u32->cfg.set_info.actuator_params.i2c_data_type;
+
+			actuator_data.cfg.set_info.actuator_params
+				.reg_tbl_params =
+				compat_ptr(
+				u32->cfg.set_info.actuator_params
+				.reg_tbl_params);
+
+			actuator_data.cfg.set_info.actuator_params
+				.init_settings =
+				compat_ptr(
+				u32->cfg.set_info.actuator_params
+				.init_settings);
+
+			actuator_data.cfg.set_info.af_tuning_params
+				.initial_code =
+				u32->cfg.set_info.af_tuning_params.initial_code;
+
+			actuator_data.cfg.set_info.af_tuning_params.pwd_step =
+				u32->cfg.set_info.af_tuning_params.pwd_step;
+
+			actuator_data.cfg.set_info.af_tuning_params
+				.region_size =
+				u32->cfg.set_info.af_tuning_params.region_size;
+
+			actuator_data.cfg.set_info.af_tuning_params
+				.total_steps =
+				u32->cfg.set_info.af_tuning_params.total_steps;
+
+			actuator_data.cfg.set_info.af_tuning_params
+				.region_params = compat_ptr(
+				u32->cfg.set_info.af_tuning_params
+				.region_params);
+
+			actuator_data.cfg.set_info.actuator_params.park_lens =
+				u32->cfg.set_info.actuator_params.park_lens;
+
+			parg = &actuator_data;
+			break;
+		case CFG_SET_DEFAULT_FOCUS:
+		case CFG_MOVE_FOCUS:
+			actuator_data.cfgtype = u32->cfgtype;
+			actuator_data.is_af_supported = u32->is_af_supported;
+			actuator_data.cfg.move.dir = u32->cfg.move.dir;
+
+			actuator_data.cfg.move.sign_dir =
+				u32->cfg.move.sign_dir;
+
+			actuator_data.cfg.move.dest_step_pos =
+				u32->cfg.move.dest_step_pos;
+
+			actuator_data.cfg.move.num_steps =
+				u32->cfg.move.num_steps;
+
+			actuator_data.cfg.move.curr_lens_pos =
+				u32->cfg.move.curr_lens_pos;
+
+			actuator_data.cfg.move.ringing_params =
+				compat_ptr(u32->cfg.move.ringing_params);
+			parg = &actuator_data;
+			break;
+		case CFG_SET_POSITION:
+			actuator_data.cfgtype = u32->cfgtype;
+			actuator_data.is_af_supported = u32->is_af_supported;
+			memcpy(&actuator_data.cfg.setpos, &(u32->cfg.setpos),
+				sizeof(struct msm_actuator_set_position_t));
+			break;
+		default:
+			actuator_data.cfgtype = u32->cfgtype;
+			parg = &actuator_data;
+			break;
+		}
+	}
+
+	if (cmd == VIDIOC_MSM_ACTUATOR_CFG32)
+		rc = msm_actuator_subdev_ioctl(sd, VIDIOC_MSM_ACTUATOR_CFG, parg);
+	else
+		rc = msm_actuator_subdev_ioctl(sd, cmd, parg);
+
+	switch (cmd) {
+
+	case VIDIOC_MSM_ACTUATOR_CFG32:
+
+		switch (u32->cfgtype) {
+
+		case CFG_SET_DEFAULT_FOCUS:
+		case CFG_MOVE_FOCUS:
+			u32->cfg.move.curr_lens_pos =
+				actuator_data.cfg.move.curr_lens_pos;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return rc;
+}
+
+static long msm_actuator_subdev_fops_ioctl(struct file *file, unsigned int cmd,
+	unsigned long arg)
+{
+	return video_usercopy(file, cmd, arg, msm_actuator_subdev_do_ioctl);
+}
+#endif
+
 static int32_t msm_actuator_power_up(struct msm_actuator_ctrl_t *a_ctrl)
 {
 	int rc = 0;
