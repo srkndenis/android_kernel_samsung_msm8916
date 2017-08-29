@@ -50,7 +50,6 @@ static struct msm_isp_bufq *msm_isp_get_bufq(
 	uint32_t bufq_index = bufq_handle & 0xFF;
 	if (bufq_index > buf_mgr->num_buf_q)
 		return bufq;
-
 	bufq = &buf_mgr->bufq[bufq_index];
 	if (bufq->bufq_handle == bufq_handle)
 		return bufq;

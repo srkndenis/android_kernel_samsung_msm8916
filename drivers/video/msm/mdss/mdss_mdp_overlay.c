@@ -899,6 +899,11 @@ int mdss_mdp_overlay_pipe_setup(struct msm_fb_data_type *mfd,
 	pipe->dst.w = req->dst_rect.w;
 	pipe->dst.h = req->dst_rect.h;
 
+	if (mixer->ctl) {
+		pipe->dst.x += mixer->ctl->border_x_off;
+		pipe->dst.y += mixer->ctl->border_y_off;
+	}
+
 	pipe->horz_deci = req->horz_deci;
 	pipe->vert_deci = req->vert_deci;
 
