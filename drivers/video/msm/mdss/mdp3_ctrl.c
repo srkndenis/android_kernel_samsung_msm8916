@@ -465,17 +465,18 @@ static int mdp3_ctrl_intf_init(struct msm_fb_data_type *mfd,
 			(v_back_porch + v_pulse_width) * hsync_period;
 		video->display_end_y =
 			vsync_period - v_front_porch * hsync_period - 1;
-		video->active_start_x = video->display_start_x;
-		video->active_end_x = video->display_end_x;
+		video->active_start_x = video->display_start_x + border_left;
+		video->active_end_x = video->display_end_x - border_right;
 		video->active_h_enable = true;
-		video->active_start_y = video->display_start_y;
-		video->active_end_y = video->display_end_y;
+		video->active_start_y = video->display_start_y + (border_top * hsync_period);
+		video->active_end_y = video->display_end_y - (border_bottom * hsync_period);
 		video->active_v_enable = true;
 		video->hsync_skew = h_sync_skew;
 		video->hsync_polarity = 1;
 		video->vsync_polarity = 1;
 		video->de_polarity = 1;
 		video->underflow_color = p->lcdc.underflow_clr;
+		video->border_color = p->lcdc.border_clr;
 	} else if (cfg.type == MDP3_DMA_OUTPUT_SEL_DSI_CMD) {
 		cfg.dsi_cmd.primary_dsi_cmd_id = 0;
 		cfg.dsi_cmd.secondary_dsi_cmd_id = 1;
