@@ -640,9 +640,9 @@ static int sdcardfs_permission(struct vfsmount *mnt, struct inode *inode, int ma
 	struct inode tmp;
 	struct inode *top = grab_top(SDCARDFS_I(inode));
 
-	if (!top) {
-		release_top(SDCARDFS_I(inode));
-		WARN(1, "Top value was null!\n");
+	if (IS_ERR(mnt))
+		return PTR_ERR(mnt);
+	if (!top)
 		return -EINVAL;
 	}
 
