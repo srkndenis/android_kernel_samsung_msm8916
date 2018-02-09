@@ -568,9 +568,6 @@ sg_write(struct file *filp, const char __user *buf, size_t count, loff_t * ppos)
 	sg_io_hdr_t *hp;
 	unsigned char cmnd[MAX_COMMAND_SIZE];
 
-	if (unlikely(segment_eq(get_fs(), KERNEL_DS)))
-		return -EINVAL;
-
 	if ((!(sfp = (Sg_fd *) filp->private_data)) || (!(sdp = sfp->parentdp)))
 		return -ENXIO;
 	SCSI_LOG_TIMEOUT(3, printk("sg_write: %s, count=%d\n",
@@ -1656,6 +1653,12 @@ static int sg_start_req(Sg_request *srp, unsigned char *cmd)
 	if (!rq)
 		return -ENOMEM;
 
+	if (hp->cmd_len > BLK_MAX_CDB)
+		rq->cmd = long_cmdp;
+	memcpy(rq->cmd, cmd, hp->cmd_len);
+
+	if (hp->cmd_len > BLK_MAX_CDB)
+		rq->cmd = long_cmdp;
 	memcpy(rq->cmd, cmd, hp->cmd_len);
 
 	rq->cmd_len = hp->cmd_len;
@@ -2566,7 +2569,7 @@ static void sg_proc_debug_helper(struct seq_file *s, Sg_device * sdp)
 			seq_printf(s, cp);
 			blen = srp->data.bufflen;
 			usg = srp->data.k_use_sg;
-			seq_printf(s, srp->done ? 
+			seq_printf(s, srp->done ?
 				   ((1 == srp->done) ?  "rcv:" : "fin:")
 				   : "act:");
 			seq_printf(s, " id=%d blen=%d",
