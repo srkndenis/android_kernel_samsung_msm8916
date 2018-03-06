@@ -2101,6 +2101,8 @@ struct diag_dci_client_tbl *dci_lookup_client_entry_pid(int pid)
 	list_for_each_safe(start, temp, &driver->dci_client_list) {
 		entry = list_entry(start, struct diag_dci_client_tbl, track);
 		pid_struct = find_get_pid(entry->tgid);
+                if (entry->client->tgid == pid)
+                        return entry;
 		if (!pid_struct) {
 			pr_err("diag: valid pid doesn't exist for pid = %d\n",
 				entry->tgid);
@@ -2112,9 +2114,6 @@ struct diag_dci_client_tbl *dci_lookup_client_entry_pid(int pid)
 				entry->tgid);
 			continue;
 		}
-		if (task_s == entry->client)
-			if (entry->client->tgid == tgid)
-				return entry;
 	}
 	return NULL;
 }
