@@ -45,6 +45,7 @@
 static DEFINE_MUTEX(binder_main_lock);
 static DEFINE_MUTEX(binder_deferred_lock);
 static DEFINE_MUTEX(binder_mmap_lock);
+static DEFINE_MUTEX(binder_context_mgr_node_lock);
 
 static HLIST_HEAD(binder_devices);
 static HLIST_HEAD(binder_procs);
@@ -223,6 +224,7 @@ struct binder_context {
 	struct binder_node *binder_context_mgr_node;
 	kuid_t binder_context_mgr_uid;
 	const char *name;
+	bool inherit_fifo_prio;
 };
 
 struct binder_device {
@@ -3168,6 +3170,29 @@ static unsigned int binder_poll(struct file *filp,
 	return 0;
 }
 
+static int binder_ioctl_set_inherit_fifo_prio(struct file *filp)
+{
+	int ret = 0;
+	struct binder_proc *proc = filp->private_data;
+	struct binder_context *context = proc->context;
+	kuid_t curr_euid = current_euid();
+	mutex_lock(&binder_context_mgr_node_lock);
+	if (uid_valid(context->binder_context_mgr_uid)) {
+		if (!uid_eq(context->binder_context_mgr_uid, curr_euid)) {
+			pr_err("BINDER_SET_INHERIT_FIFO_PRIO bad uid %d != %d\n",
+			       from_kuid(&init_user_ns, curr_euid),
+			       from_kuid(&init_user_ns,
+					 context->binder_context_mgr_uid));
+			ret = -EPERM;
+			goto out;
+		}
+	}
+	context->inherit_fifo_prio = true;
+ out:
+	mutex_unlock(&binder_context_mgr_node_lock);
+	return ret;
+}
+
 static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	int ret;
@@ -3277,6 +3302,11 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		context->binder_context_mgr_node->local_strong_refs++;
 		context->binder_context_mgr_node->has_strong_ref = 1;
 		context->binder_context_mgr_node->has_weak_ref = 1;
+		break;
+	case BINDER_SET_INHERIT_FIFO_PRIO:
+		ret = binder_ioctl_set_inherit_fifo_prio(filp);
+		if (ret)
+			goto err;
 		break;
 	case BINDER_THREAD_EXIT:
 		binder_debug(BINDER_DEBUG_THREADS, "%d:%d exit\n",
@@ -4040,6 +4070,7 @@ static void print_binder_proc_stats(struct seq_file *m,
 	int count, strong, weak;
 
 	seq_printf(m, "proc %d\n", proc->pid);
+	seq_printf(m, "context FIFO: %d\n", proc->context->inherit_fifo_prio);
 	seq_printf(m, "context %s\n", proc->context->name);
 	count = 0;
 	for (n = rb_first(&proc->threads); n != NULL; n = rb_next(n))
