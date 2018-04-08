@@ -957,6 +957,7 @@ static long snd_rawmidi_kernel_read1(struct snd_rawmidi_substream *substream,
 	unsigned long flags;
 	long result = 0, count1;
 	struct snd_rawmidi_runtime *runtime = substream->runtime;
+
 	if (userbuf)
 		mutex_lock(&runtime->realloc_mutex);
 	while (count > 0 && runtime->avail) {

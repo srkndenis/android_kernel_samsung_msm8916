@@ -521,6 +521,11 @@ static ssize_t profile_assignments_read(struct file *filep,
 
 	mutex_lock(&device->mutex);
 
+	if (profile->assignment_count == 0) {
+		mutex_unlock(&device->mutex);
+		return 0;
+	}
+
 	buf = kmalloc(max_size, GFP_KERNEL);
 	if (!buf) {
 		mutex_unlock(&device->mutex);
@@ -934,7 +939,7 @@ static ssize_t profile_pipe_print(struct file *filep, char __user *ubuf,
 
 		mutex_unlock(&device->mutex);
 		set_current_state(TASK_INTERRUPTIBLE);
-		schedule_timeout(HZ / 10);
+		schedule_timeout(msecs_to_jiffies(100));
 		mutex_lock(&device->mutex);
 
 		if (signal_pending(current)) {

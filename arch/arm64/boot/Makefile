@@ -14,7 +14,7 @@
 # Based on the ia64 boot/Makefile.
 #
 
-include $(srctree)/arch/arm64/boot/dts/Makefile
+include $(srctree)/arch/arm64/boot/dts/qcom/Makefile
 
 targets := Image Image.gz
 
@@ -42,3 +42,5 @@ install: $(obj)/Image
 zinstall: $(obj)/Image.gz
 	$(CONFIG_SHELL) $(srctree)/$(src)/install.sh $(KERNELRELEASE) \
 	$(obj)/Image.gz System.map "$(INSTALL_PATH)"
+
+clean-files := Image Image-dtb Image.gz Image.gz-dtb

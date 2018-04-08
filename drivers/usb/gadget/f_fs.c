@@ -824,15 +824,28 @@ first_try:
 			}
 		}
 
-		buffer_len = !read ? len : round_up(len,
+		spin_lock_irq(&epfile->ffs->eps_lock);
+		/*
+		 * While we were acquiring lock endpoint got disabled
+		 * (disconnect) or changed (composition switch) ?
+		 */
+		if (epfile->ep == ep) {
+			buffer_len = !read ? len : round_up(len,
 						ep->ep->desc->wMaxPacketSize);
+		} else {
+			spin_unlock_irq(&epfile->ffs->eps_lock);
+			ret = -ENODEV;
+			goto error;
+		}
 
 		/* Do we halt? */
 		halt = !read == !epfile->in;
 		if (halt && epfile->isoc) {
+			spin_unlock_irq(&epfile->ffs->eps_lock);
 			ret = -EINVAL;
 			goto error;
 		}
+		spin_unlock_irq(&epfile->ffs->eps_lock);
 
 		/* Allocate & copy */
 		if (!halt && !data) {
@@ -1409,14 +1422,14 @@ static void ffs_data_clear(struct ffs_data *ffs)
 {
 	ENTER();
 
-	pr_debug("%s: ffs->gadget= %p, ffs->flags= %lu\n", __func__,
+	pr_debug("%s: ffs->gadget= %pK, ffs->flags= %lu\n", __func__,
 						ffs->gadget, ffs->flags);
 	if (test_and_clear_bit(FFS_FL_CALL_CLOSED_CALLBACK, &ffs->flags))
 		functionfs_closed_callback(ffs);
 
 	/* Dump ffs->gadget and ffs->flags */
 	if (ffs->gadget)
-		pr_err("%s: ffs->gadget= %p, ffs->flags= %lu\n", __func__,
+		pr_err("%s: ffs->gadget= %pK, ffs->flags= %lu\n", __func__,
 						ffs->gadget, ffs->flags);
 	BUG_ON(ffs->gadget);
 
@@ -1469,15 +1482,8 @@ static int functionfs_bind(struct ffs_data *ffs, struct usb_composite_dev *cdev)
 		 || test_and_set_bit(FFS_FL_BOUND, &ffs->flags)))
 		return -EBADFD;
 
-#if defined(CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE)
-	printk("%s : first id = %d , old string count = %d , string count = %d\n",__func__,ffs->first_id,ffs->old_strings_count,ffs->strings_count);
-#endif
-
 	if (!ffs->first_id || ffs->old_strings_count < ffs->strings_count) {
 		int first_id = usb_string_ids_n(cdev, ffs->strings_count);
-#if defined(CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE)
-		printk("%s : first id = %d , old string count = %d , string count = %d\n",__func__,ffs->first_id,ffs->old_strings_count,ffs->strings_count);
-#endif
 		if (unlikely(first_id < 0))
 			return first_id;
 		ffs->first_id = first_id;
@@ -1491,11 +1497,6 @@ static int functionfs_bind(struct ffs_data *ffs, struct usb_composite_dev *cdev)
 	ffs->ep0req->context = ffs;
 
 	lang = ffs->stringtabs;
-#if defined(CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE)
-	if( lang == NULL )
-		printk("%s :  string tab is NULL! \n",__func__);
-	else	
-#else
 	if (lang) {
 		for (; *lang; ++lang) {
 			struct usb_string *str = (*lang)->strings;
@@ -1504,7 +1505,7 @@ static int functionfs_bind(struct ffs_data *ffs, struct usb_composite_dev *cdev)
 				str->id = id;
 		}
 	}
-#endif
+
 	ffs->gadget = cdev->gadget;
 	ffs_data_get(ffs);
 	return 0;

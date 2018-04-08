@@ -29,7 +29,6 @@
 #include <linux/spinlock.h>
 #include <linux/device.h>
 #include <linux/idr.h>
-#include <linux/debugfs.h>
 #include <linux/interrupt.h>
 #include <linux/of_gpio.h>
 #include <linux/cdev.h>
@@ -38,9 +37,6 @@
 #include <soc/qcom/subsystem_notif.h>
 #include <soc/qcom/socinfo.h>
 #include <soc/qcom/sysmon.h>
-#ifdef CONFIG_SEC_DEBUG
-#include <linux/sec_debug.h>
-#endif
 
 #include <asm/current.h>
 
@@ -51,6 +47,10 @@ module_param(disable_restart_work, uint, S_IRUGO | S_IWUSR);
 
 static int enable_debug;
 module_param(enable_debug, int, S_IRUGO | S_IWUSR);
+
+/* The maximum shutdown timeout is the product of MAX_LOOPS and DELAY_MS. */
+#define SHUTDOWN_ACK_MAX_LOOPS	50
+#define SHUTDOWN_ACK_DELAY_MS	100
 
 /**
  * enum p_subsys_state - state of a subsystem (private)
@@ -145,7 +145,6 @@ struct restart_log {
  * @restart_level: restart level (0 - panic, 1 - related, 2 - independent, etc.)
  * @restart_order: order of other devices this devices restarts with
  * @crash_count: number of times the device has crashed
- * @dentry: debugfs directory for this device
  * @do_ramdump_on_put: ramdump on subsystem_put() if true
  * @err_ready: completion variable to record error ready from subsystem
  * @crashed: indicates if subsystem has crashed
@@ -156,11 +155,7 @@ struct subsys_device {
 	struct work_struct work;
 	struct wakeup_source ssr_wlock;
 	char wlname[64];
-#ifdef CONFIG_SEC_DEBUG
-	struct delayed_work device_restart_delayed_work;
-#else
 	struct work_struct device_restart_work;
-#endif
 	struct subsys_tracking track;
 
 	void *notify;
@@ -171,9 +166,6 @@ struct subsys_device {
 	int restart_level;
 	int crash_count;
 	struct subsys_soc_restart_order *restart_order;
-#ifdef CONFIG_DEBUG_FS
-	struct dentry *dentry;
-#endif
 	bool do_ramdump_on_put;
 	struct cdev char_dev;
 	dev_t dev_no;
@@ -233,6 +225,38 @@ static ssize_t restart_level_store(struct device *dev,
 	return -EPERM;
 }
 
+static ssize_t system_debug_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct subsys_device *subsys = to_subsys(dev);
+	char p[6] = "set";
+
+	if (!subsys->desc->system_debug)
+		strlcpy(p, "reset", sizeof(p));
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", p);
+}
+
+static ssize_t system_debug_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t count)
+{
+	struct subsys_device *subsys = to_subsys(dev);
+	const char *p;
+
+	p = memchr(buf, '\n', count);
+	if (p)
+		count = p - buf;
+
+	if (!strncasecmp(buf, "set", count))
+		subsys->desc->system_debug = true;
+	else if (!strncasecmp(buf, "reset", count))
+		subsys->desc->system_debug = false;
+	else
+		return -EPERM;
+	return count;
+}
+
 int subsys_get_restart_level(struct subsys_device *dev)
 {
 	return dev->restart_level;
@@ -273,13 +297,15 @@ static struct device_attribute subsys_attrs[] = {
 	__ATTR_RO(state),
 	__ATTR_RO(crash_count),
 	__ATTR(restart_level, 0644, restart_level_show, restart_level_store),
+	__ATTR(system_debug, 0644, system_debug_show, system_debug_store),
 	__ATTR_NULL,
 };
 
-static struct bus_type subsys_bus_type = {
+struct bus_type subsys_bus_type = {
 	.name		= "msm_subsys",
 	.dev_attrs	= subsys_attrs,
 };
+EXPORT_SYMBOL(subsys_bus_type);
 
 static DEFINE_IDA(subsys_ida);
 
@@ -484,6 +510,25 @@ static void disable_all_irqs(struct subsys_device *dev)
 		disable_irq(dev->desc->stop_ack_irq);
 }
 
+int wait_for_shutdown_ack(struct subsys_desc *desc)
+{
+	int count;
+
+	if (desc && !desc->shutdown_ack_gpio)
+		return 0;
+
+	for (count = SHUTDOWN_ACK_MAX_LOOPS; count > 0; count--) {
+		if (gpio_get_value(desc->shutdown_ack_gpio))
+			return count;
+		msleep(SHUTDOWN_ACK_DELAY_MS);
+	}
+
+	pr_err("[%s]: Timed out waiting for shutdown ack\n", desc->name);
+
+	return -ETIMEDOUT;
+}
+EXPORT_SYMBOL(wait_for_shutdown_ack);
+
 static int wait_for_err_ready(struct subsys_device *subsys)
 {
 	int ret;
@@ -524,6 +569,12 @@ static void subsystem_ramdump(struct subsys_device *dev, void *data)
 			pr_warn("%s[%s:%d]: Ramdump failed.\n",
 				name, current->comm, current->pid);
 	dev->do_ramdump_on_put = false;
+}
+
+static void subsystem_free_memory(struct subsys_device *dev, void *data)
+{
+	if (dev->desc->free_memory)
+		dev->desc->free_memory(dev->desc);
 }
 
 static void subsystem_powerup(struct subsys_device *dev, void *data)
@@ -714,23 +765,13 @@ void subsystem_put(void *subsystem)
 			subsys->desc->name, __func__))
 		goto err_out;
 	if (!--subsys->count) {
-#ifdef CONFIG_SEC_DEBUG
-		if (strncmp(subsys->desc->name, "modem", 5)) {
 		subsys_stop(subsys);
 		if (subsys->do_ramdump_on_put)
 			subsystem_ramdump(subsys, NULL);
-	}
-		else {
-			pr_err("subsys: block modem put stop for stabilty\n");
-			subsys->count++;
-		}
-#else
-		subsys_stop(subsys);
-		if (subsys->do_ramdump_on_put)
-			subsystem_ramdump(subsys, NULL);
-#endif
 	}
 	mutex_unlock(&track->lock);
+
+	subsystem_free_memory(subsys, NULL);
 
 	subsys_d = find_subsys(subsys->desc->depends_on);
 	if (subsys_d) {
@@ -815,6 +856,8 @@ static void subsystem_restart_wq_func(struct work_struct *work)
 	/* Collect ram dumps for all subsystems in order here */
 	for_each_subsys_device(list, count, NULL, subsystem_ramdump);
 
+	for_each_subsys_device(list, count, NULL, subsystem_free_memory);
+
 	notify_each_subsys_device(list, count, SUBSYS_BEFORE_POWERUP, NULL);
 	for_each_subsys_device(list, count, NULL, subsystem_powerup);
 	notify_each_subsys_device(list, count, SUBSYS_AFTER_POWERUP, NULL);
@@ -864,14 +907,9 @@ static void __subsystem_restart_dev(struct subsys_device *dev)
 
 static void device_restart_work_hdlr(struct work_struct *work)
 {
-#ifdef CONFIG_SEC_DEBUG
-	struct subsys_device *dev = container_of(to_delayed_work(work),
-						struct subsys_device,
-						device_restart_delayed_work);
-#else
 	struct subsys_device *dev = container_of(work, struct subsys_device,
 							device_restart_work);
-#endif
+
 	notify_each_subsys_device(&dev, 1, SUBSYS_SOC_RESET, NULL);
 	panic("subsys-restart: Resetting the SoC - %s crashed.",
 							dev->desc->name);
@@ -890,17 +928,6 @@ int subsystem_restart_dev(struct subsys_device *dev)
 	}
 
 	name = dev->desc->name;
-
-#ifdef CONFIG_SEC_DEBUG
-#if 0 //def CONFIG_SEC_SSR_DEBUG_LEVEL_CHK /* Temporarily blocking until requested by cp or pl team */
-	if (!sec_debug_is_enabled_for_ssr())
-#else
-	if (!sec_debug_is_enabled())
-#endif
-		dev->restart_level = RESET_SUBSYS_COUPLED; //Why is it delete the RESET_SUBSYS_INDEPENDENT on MSM8974 ?
-	else
-		dev->restart_level = RESET_SOC;
-#endif
 
 	/*
 	 * If a system reboot/shutdown is underway, ignore subsystem errors.
@@ -929,25 +956,7 @@ int subsystem_restart_dev(struct subsys_device *dev)
 		break;
 	case RESET_SOC:
 		__pm_stay_awake(&dev->ssr_wlock);
-#ifdef CONFIG_SEC_DEBUG
-		/*
-		 * If the silent log function is enabled for CP and CP is in
-		 * trouble, diag_mdlog (APP) should be terminated before
-		 * a panic occurs, since it can flush logs to SD card
-		 * when it is over.
-		 * We should guarantee time the App needs for saving logs
-		 * as well, so we use a delayed workqueue.
-		 */
-		if(silent_log_panic_handler())
-			schedule_delayed_work(&dev->device_restart_delayed_work,
-				msecs_to_jiffies(300));
-		else
-			schedule_delayed_work(&dev->device_restart_delayed_work,
-				0);
-
-#else
 		schedule_work(&dev->device_restart_work);
-#endif
 		return 0;
 	default:
 		panic("subsys-restart: Unknown restart level!\n");
@@ -1038,87 +1047,6 @@ void notify_proxy_unvote(struct device *device)
 	if (dev)
 		notify_each_subsys_device(&dev, 1, SUBSYS_PROXY_UNVOTE, NULL);
 }
-
-#ifdef CONFIG_DEBUG_FS
-static ssize_t subsys_debugfs_read(struct file *filp, char __user *ubuf,
-		size_t cnt, loff_t *ppos)
-{
-	int r;
-	char buf[40];
-	struct subsys_device *subsys = filp->private_data;
-
-	r = snprintf(buf, sizeof(buf), "%d\n", subsys->count);
-	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
-}
-
-static ssize_t subsys_debugfs_write(struct file *filp,
-		const char __user *ubuf, size_t cnt, loff_t *ppos)
-{
-	struct subsys_device *subsys = filp->private_data;
-	char buf[10];
-	char *cmp;
-
-	cnt = min(cnt, sizeof(buf) - 1);
-	if (copy_from_user(&buf, ubuf, cnt))
-		return -EFAULT;
-	buf[cnt] = '\0';
-	cmp = strstrip(buf);
-
-	if (!strcmp(cmp, "restart")) {
-		if (subsystem_restart_dev(subsys))
-			return -EIO;
-	} else if (!strcmp(cmp, "get")) {
-		if (subsystem_get(subsys->desc->name))
-			return -EIO;
-	} else if (!strcmp(cmp, "put")) {
-		subsystem_put(subsys);
-	} else {
-		return -EINVAL;
-	}
-
-	return cnt;
-}
-
-static const struct file_operations subsys_debugfs_fops = {
-	.open	= simple_open,
-	.read	= subsys_debugfs_read,
-	.write	= subsys_debugfs_write,
-};
-
-static struct dentry *subsys_base_dir;
-
-static int __init subsys_debugfs_init(void)
-{
-	subsys_base_dir = debugfs_create_dir("msm_subsys", NULL);
-	return !subsys_base_dir ? -ENOMEM : 0;
-}
-
-static void subsys_debugfs_exit(void)
-{
-	debugfs_remove_recursive(subsys_base_dir);
-}
-
-static int subsys_debugfs_add(struct subsys_device *subsys)
-{
-	if (!subsys_base_dir)
-		return -ENOMEM;
-
-	subsys->dentry = debugfs_create_file(subsys->desc->name,
-				S_IRUGO | S_IWUSR, subsys_base_dir,
-				subsys, &subsys_debugfs_fops);
-	return !subsys->dentry ? -ENOMEM : 0;
-}
-
-static void subsys_debugfs_remove(struct subsys_device *subsys)
-{
-	debugfs_remove(subsys->dentry);
-}
-#else
-static int __init subsys_debugfs_init(void) { return 0; };
-static void subsys_debugfs_exit(void) { }
-static int subsys_debugfs_add(struct subsys_device *subsys) { return 0; }
-static void subsys_debugfs_remove(struct subsys_device *subsys) { }
-#endif
 
 static int subsys_device_open(struct inode *inode, struct file *file)
 {
@@ -1347,15 +1275,15 @@ static int __get_gpio(struct subsys_desc *desc, const char *prop,
 }
 
 static int __get_irq(struct subsys_desc *desc, const char *prop,
-		unsigned int *irq)
+		unsigned int *irq, int *gpio)
 {
-	int ret, gpio, irql;
+	int ret, gpiol, irql;
 
-	ret = __get_gpio(desc, prop, &gpio);
+	ret = __get_gpio(desc, prop, &gpiol);
 	if (ret)
 		return ret;
 
-	irql = gpio_to_irq(gpio);
+	irql = gpio_to_irq(gpiol);
 
 	if (irql == -ENOENT)
 		irql = -ENXIO;
@@ -1365,6 +1293,8 @@ static int __get_irq(struct subsys_desc *desc, const char *prop,
 				prop);
 		return irql;
 	} else {
+		if (gpio)
+			*gpio = gpiol;
 		*irq = irql;
 	}
 
@@ -1379,15 +1309,17 @@ static int subsys_parse_devicetree(struct subsys_desc *desc)
 	struct platform_device *pdev = container_of(desc->dev,
 					struct platform_device, dev);
 
-	ret = __get_irq(desc, "qcom,gpio-err-fatal", &desc->err_fatal_irq);
+	ret = __get_irq(desc, "qcom,gpio-err-fatal", &desc->err_fatal_irq,
+							&desc->err_fatal_gpio);
 	if (ret && ret != -ENOENT)
 		return ret;
 
-	ret = __get_irq(desc, "qcom,gpio-err-ready", &desc->err_ready_irq);
+	ret = __get_irq(desc, "qcom,gpio-err-ready", &desc->err_ready_irq,
+							NULL);
 	if (ret && ret != -ENOENT)
 		return ret;
 
-	ret = __get_irq(desc, "qcom,gpio-stop-ack", &desc->stop_ack_irq);
+	ret = __get_irq(desc, "qcom,gpio-stop-ack", &desc->stop_ack_irq, NULL);
 	if (ret && ret != -ENOENT)
 		return ret;
 
@@ -1397,6 +1329,11 @@ static int subsys_parse_devicetree(struct subsys_desc *desc)
 
 	ret = __get_gpio(desc, "qcom,gpio-ramdump-disable",
 			&desc->ramdump_disable_gpio);
+	if (ret && ret != -ENOENT)
+		return ret;
+
+	ret = __get_gpio(desc, "qcom,gpio-shutdown-ack",
+			&desc->shutdown_ack_gpio);
 	if (ret && ret != -ENOENT)
 		return ret;
 
@@ -1510,12 +1447,7 @@ struct subsys_device *subsys_register(struct subsys_desc *desc)
 	snprintf(subsys->wlname, sizeof(subsys->wlname), "ssr(%s)", desc->name);
 	wakeup_source_init(&subsys->ssr_wlock, subsys->wlname);
 	INIT_WORK(&subsys->work, subsystem_restart_wq_func);
-#ifdef CONFIG_SEC_DEBUG
-	INIT_DELAYED_WORK(&subsys->device_restart_delayed_work,
-				device_restart_work_hdlr);
-#else
 	INIT_WORK(&subsys->device_restart_work, device_restart_work_hdlr);
-#endif
 	spin_lock_init(&subsys->track.s_lock);
 
 	subsys->id = ida_simple_get(&subsys_ida, 0, 0, GFP_KERNEL);
@@ -1526,10 +1458,6 @@ struct subsys_device *subsys_register(struct subsys_desc *desc)
 	dev_set_name(&subsys->dev, "subsys%d", subsys->id);
 
 	mutex_init(&subsys->track.lock);
-
-	ret = subsys_debugfs_add(subsys);
-	if (ret)
-		goto err_debugfs;
 
 	ret = device_register(&subsys->dev);
 	if (ret) {
@@ -1582,8 +1510,6 @@ err_setup_irqs:
 	if (ofnode)
 		subsys_remove_restart_order(ofnode);
 err_register:
-	subsys_debugfs_remove(subsys);
-err_debugfs:
 	mutex_destroy(&subsys->track.lock);
 	ida_simple_remove(&subsys_ida, subsys->id);
 err_ida:
@@ -1616,7 +1542,6 @@ void subsys_unregister(struct subsys_device *subsys)
 		WARN_ON(subsys->count);
 		device_unregister(&subsys->dev);
 		mutex_unlock(&subsys->track.lock);
-		subsys_debugfs_remove(subsys);
 		subsys_char_device_remove(subsys);
 		sysmon_notifier_unregister(subsys->desc);
 		put_device(&subsys->dev);
@@ -1654,9 +1579,6 @@ static int __init subsys_restart_init(void)
 	ret = bus_register(&subsys_bus_type);
 	if (ret)
 		goto err_bus;
-	ret = subsys_debugfs_init();
-	if (ret)
-		goto err_debugfs;
 
 	char_class = class_create(THIS_MODULE, "subsys");
 	if (IS_ERR(char_class)) {
@@ -1675,8 +1597,6 @@ static int __init subsys_restart_init(void)
 err_soc:
 	class_destroy(char_class);
 err_class:
-	subsys_debugfs_exit();
-err_debugfs:
 	bus_unregister(&subsys_bus_type);
 err_bus:
 	destroy_workqueue(ssr_wq);

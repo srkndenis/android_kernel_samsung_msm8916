@@ -16,9 +16,6 @@
 #include <linux/bitmap.h>
 
 #include "internals.h"
-#ifdef CONFIG_SEC_DEBUG
-#include <linux/sec_debug.h>
-#endif
 
 /*
  * lockdep: we want to handle all irq_desc locks as a single lock-class:
@@ -94,6 +91,9 @@ static void desc_set_defaults(unsigned int irq, struct irq_desc *desc, int node,
 	for_each_possible_cpu(cpu)
 		*per_cpu_ptr(desc->kstat_irqs, cpu) = 0;
 	desc_smp_init(desc, node);
+#ifdef CONFIG_SMP
+	INIT_LIST_HEAD(&desc->affinity_notify);
+#endif
 }
 
 int nr_irqs = NR_IRQS;
@@ -316,15 +316,6 @@ int generic_handle_irq(unsigned int irq)
 
 	if (!desc)
 		return -EINVAL;
-#ifdef CONFIG_SEC_DEBUG
-	if (desc->action)
-		sec_debug_irq_sched_log(irq, (void *)desc->action->handler,
-			irqs_disabled());
-	else
-		sec_debug_irq_sched_log(irq, (void *)desc->handle_irq,
-			irqs_disabled());
-#endif
-
 	generic_handle_irq_desc(irq, desc);
 	return 0;
 }

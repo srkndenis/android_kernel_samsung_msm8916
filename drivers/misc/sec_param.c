@@ -20,6 +20,7 @@
 #define PARAM_WR	1
 
 #define SEC_PARAM_FILE_NAME	"/dev/block/platform/soc.0/7824900.sdhci/by-name/param"	/* parameter block */
+#define SEC_PARAM_FILE_NAME2	"/dev/block/platform/7824900.sdhci/by-name/param"	/* parameter block */
 #define SEC_PARAM_FILE_SIZE	0xA00000		/* 10MB */
 #define SEC_PARAM_FILE_OFFSET (SEC_PARAM_FILE_SIZE - 0x100000)
 
@@ -40,9 +41,16 @@ static bool param_sec_operation(void *value, int offset,
 	filp = filp_open(SEC_PARAM_FILE_NAME, flag, 0);
 
 	if (IS_ERR(filp)) {
-		pr_err("%s: filp_open failed. (%ld)\n",
+		pr_err("%s: filp_open failed. Trying second path. (%ld)\n",
 				__func__, PTR_ERR(filp));
-		return false;
+
+		filp = filp_open(SEC_PARAM_FILE_NAME2, flag, 0);
+
+		if (IS_ERR(filp)) {
+			pr_err("%s: filp_open failed. (%ld)\n",
+				__func__, PTR_ERR(filp));
+			return false;
+		}
 	}
 
 	fs = get_fs();
@@ -126,17 +134,6 @@ bool sec_get_param(enum sec_param_index index, void *value)
 		printk(KERN_INFO "param_data.update_cp_bin :[%d]!!", param_data->update_cp_bin);
 		break;
 #endif
-#ifdef CONFIG_RTC_AUTO_PWRON_PARAM
-	case param_index_boot_alarm_set:
-		memcpy(value, &(param_data->boot_alarm_set), sizeof(unsigned int));
-		break;
-	case param_index_boot_alarm_value_l:
-		memcpy(value, &(param_data->boot_alarm_value_l), sizeof(unsigned int));
-		break;
-	case param_index_boot_alarm_value_h:
-		memcpy(value, &(param_data->boot_alarm_value_h), sizeof(unsigned int));
-		break;
-#endif
 #ifdef CONFIG_SEC_MONITOR_BATTERY_REMOVAL
 	case param_index_normal_poweroff:
 		memcpy(&(param_data->normal_poweroff), value, sizeof(unsigned int));
@@ -145,6 +142,11 @@ bool sec_get_param(enum sec_param_index index, void *value)
 #ifdef CONFIG_RESTART_REASON_SEC_PARAM
 	case param_index_restart_reason:
 		memcpy(value, &(param_data->param_restart_reason), sizeof(unsigned int));
+		break;
+#endif
+#ifdef CONFIG_BARCODE_PAINTER
+	case param_index_barcode_info:
+		memcpy(value, param_data->param_barcode_info, sizeof(param_data->param_barcode_info));
 		break;
 #endif
 	default:
@@ -191,17 +193,6 @@ bool sec_set_param(enum sec_param_index index, void *value)
 				value, sizeof(unsigned int));
 		break;
 #endif
-#ifdef CONFIG_RTC_AUTO_PWRON_PARAM
-	case param_index_boot_alarm_set:
-		memcpy(&(param_data->boot_alarm_set), value, sizeof(unsigned int));
-		break;
-	case param_index_boot_alarm_value_l:
-		memcpy(&(param_data->boot_alarm_value_l), value, sizeof(unsigned int));
-		break;
-	case param_index_boot_alarm_value_h:
-		memcpy(&(param_data->boot_alarm_value_h), value, sizeof(unsigned int));
-		break;
-#endif
 #ifdef CONFIG_SEC_MONITOR_BATTERY_REMOVAL
 	case param_index_normal_poweroff:
 		memcpy(&(param_data->normal_poweroff), value, sizeof(unsigned int));
@@ -211,6 +202,12 @@ bool sec_set_param(enum sec_param_index index, void *value)
 	case param_index_restart_reason:
 		memcpy(&(param_data->param_restart_reason),
 				value, sizeof(unsigned int));
+		break;
+#endif
+#ifdef CONFIG_BARCODE_PAINTER
+	case param_index_barcode_info:
+		memcpy(param_data->param_barcode_info,
+				value, sizeof(param_data->param_barcode_info));
 		break;
 #endif
 	default:

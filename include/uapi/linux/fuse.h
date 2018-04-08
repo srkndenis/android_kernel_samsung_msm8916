@@ -93,6 +93,11 @@
  *
  * 7.22
  *  - add FUSE_ASYNC_DIO
+ *
+ * 7.23
+ *  - add FUSE_WRITEBACK_CACHE
+ *  - add time_gran to fuse_init_out
+ *  - add reserved space to fuse_init_out
  */
 
 #ifndef _LINUX_FUSE_H
@@ -128,7 +133,7 @@
 #define FUSE_KERNEL_VERSION 7
 
 /** Minor version number of this interface */
-#define FUSE_KERNEL_MINOR_VERSION 22
+#define FUSE_KERNEL_MINOR_VERSION 23
 
 /** The node ID of the root inode */
 #define FUSE_ROOT_ID 1
@@ -571,7 +576,7 @@ struct fuse_init_out {
 	uint16_t	congestion_threshold;
 	uint32_t	max_write;
 	uint32_t	time_gran;
-    uint32_t    unused[9];
+	uint32_t	unused[9];
 };
 
 #define CUSE_INIT_INFO_MAX 4096

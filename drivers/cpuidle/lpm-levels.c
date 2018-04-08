@@ -42,9 +42,7 @@
 #include <asm/arch_timer.h>
 #include <asm/cacheflush.h>
 #include "lpm-levels.h"
-#ifdef CONFIG_CX_VOTE_TURBO
 #include "lpm-workarounds.h"
-#endif
 #include <trace/events/power.h>
 #include <linux/regulator/consumer.h>
 #include <linux/pinctrl/sec-pinmux.h>
@@ -55,6 +53,7 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/trace_msm_low_power.h>
+
 #define SCLK_HZ (32768)
 #define SCM_HANDOFF_LOCK_ID "S:7"
 static remote_spinlock_t scm_handoff_lock;
@@ -109,12 +108,6 @@ module_param_named(
 static int msm_pm_sleep_time_override;
 module_param_named(sleep_time_override,
 	msm_pm_sleep_time_override, int, S_IRUGO | S_IWUSR | S_IWGRP);
-
-#ifdef CONFIG_SEC_PM_DEBUG
-static int msm_pm_sleep_sec_debug;
-module_param_named(secdebug,
-	msm_pm_sleep_sec_debug, int, S_IRUGO | S_IWUSR | S_IWGRP);
-#endif
 
 static bool print_parsed_dt;
 module_param_named(
@@ -228,7 +221,13 @@ int set_l2_mode(struct low_power_ops *ops, int mode, bool notify_rpm)
 		lpm = MSM_SPM_MODE_DISABLED;
 		break;
 	}
-	rc = msm_spm_config_low_power_mode(ops->spm, lpm, true);
+
+	/* Do not program L2 SPM enable bit. This will be set by TZ */
+	if (lpm_wa_get_skip_l2_spm())
+		rc = msm_spm_config_low_power_mode_addr(ops->spm, lpm,
+							true);
+	else
+		rc = msm_spm_config_low_power_mode(ops->spm, lpm, true);
 
 	if (rc)
 		pr_err("%s: Failed to set L2 low power mode %d, ERR %d",
@@ -487,7 +486,7 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 	}
 	if (level->notify_rpm) {
 		struct cpumask nextcpu;
-		uint32_t us;
+		uint64_t us;
 
 		us = get_cluster_sleep_time(cluster, &nextcpu, from_idle);
 
@@ -498,7 +497,7 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 		}
 
 		do_div(us, USEC_PER_SEC/SCLK_HZ);
-		msm_mpm_enter_sleep((uint32_t)us, from_idle, &nextcpu);
+		msm_mpm_enter_sleep(us, from_idle, &nextcpu);
 	}
 	cluster->last_level = idx;
 	spin_unlock(&cluster->sync_lock);
@@ -602,14 +601,6 @@ static void cluster_unprepare(struct lpm_cluster *cluster,
 	level = &cluster->levels[cluster->last_level];
 	if (level->notify_rpm) {
 		msm_rpm_exit_sleep();
-#ifdef CONFIG_CX_VOTE_TURBO
-		/* If RPM bumps up CX to turbo, unvote CX turbo vote
-		 * during exit of rpm assisted power collapse to
-		 * reduce the power impact
-		 */
-
-		lpm_wa_cx_unvote_send();
-#endif
 		msm_mpm_exit_sleep(from_idle);
 	}
 
@@ -840,6 +831,8 @@ static void register_cpu_lpm_stats(struct lpm_cpu *cpu,
 
 	lpm_stats_config_level("cpu", level_name, cpu->nlevels,
 			parent->stats, &parent->child_cpus);
+
+	kfree(level_name);
 }
 
 static void register_cluster_lpm_stats(struct lpm_cluster *cl,
@@ -899,13 +892,6 @@ static int lpm_suspend_prepare(void)
 
 #ifdef CONFIG_SEC_PM
 	regulator_showall_enabled();
-#endif
-
-#ifdef CONFIG_SEC_PM_DEBUG
-	if (msm_pm_sleep_sec_debug) {
-		msm_gpio_print_enabled();
-		qpnp_debug_suspend_show();
-	}
 #endif
 
 	return 0;
@@ -1013,6 +999,7 @@ static int lpm_probe(struct platform_device *pdev)
 				__func__);
 		goto failed;
 	}
+
 	return 0;
 failed:
 	free_cluster_node(lpm_root_node);

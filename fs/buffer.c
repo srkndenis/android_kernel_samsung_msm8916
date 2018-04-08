@@ -644,25 +644,6 @@ void mark_buffer_dirty_inode(struct buffer_head *bh, struct inode *inode)
 }
 EXPORT_SYMBOL(mark_buffer_dirty_inode);
 
-void mark_buffer_dirty_inode_sync(struct buffer_head *bh, struct inode *inode)
-{
-	set_buffer_sync_flush(bh);
-	mark_buffer_dirty_inode(bh, inode);
-}
-EXPORT_SYMBOL(mark_buffer_dirty_inode_sync);
-
-#ifdef CONFIG_BLK_DEV_IO_TRACE
-static inline void save_dirty_task(struct page *page)
-{
-	/* Save the task that is dirtying this page */
-	page->tsk_dirty = current;
-}
-#else
-static inline void save_dirty_task(struct page *page)
-{
-}
-#endif
-
 /*
  * Mark the page dirty, and set it dirty in the radix tree, and mark the inode
  * dirty.
@@ -681,7 +662,8 @@ static void __set_page_dirty(struct page *page,
 		account_page_dirtied(page, mapping);
 		radix_tree_tag_set(&mapping->page_tree,
 				page_index(page), PAGECACHE_TAG_DIRTY);
-		save_dirty_task(page);
+		/* Save the task that is dirtying this page */
+		page->tsk_dirty = current;
 	}
 	spin_unlock_irqrestore(&mapping->tree_lock, flags);
 	__mark_inode_dirty(mapping->host, I_DIRTY_PAGES);
@@ -1039,7 +1021,8 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 		bh = page_buffers(page);
 		if (bh->b_size == size) {
 			end_block = init_page_buffers(page, bdev,
-						index << sizebits, size);
+						(sector_t)index << sizebits,
+						size);
 			goto done;
 		}
 		if (!try_to_free_buffers(page))
@@ -1060,7 +1043,8 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	 */
 	spin_lock(&inode->i_mapping->private_lock);
 	link_dev_buffers(page, bh);
-	end_block = init_page_buffers(page, bdev, index << sizebits, size);
+	end_block = init_page_buffers(page, bdev, (sector_t)index << sizebits,
+			size);
 	spin_unlock(&inode->i_mapping->private_lock);
 done:
 	ret = (block < end_block) ? 1 : -ENXIO;
@@ -1199,34 +1183,6 @@ void mark_buffer_dirty(struct buffer_head *bh)
 	}
 }
 EXPORT_SYMBOL(mark_buffer_dirty);
-
-void mark_buffer_dirty_sync(struct buffer_head *bh)
-{
-	WARN_ON_ONCE(!buffer_uptodate(bh));
-
-	/*
-	 * Very *carefully* optimize the it-is-already-dirty case.
-	 *
-	 * Don't let the final "is it dirty" escape to before we
-	 * perhaps modified the buffer.
-	 */
-	if (buffer_dirty(bh)) {
-		smp_mb();
-		if (buffer_dirty(bh))
-			return;
-	}
-
-	set_buffer_sync_flush(bh);
-	if (!test_set_buffer_dirty(bh)) {
-		struct page *page = bh->b_page;
-		if (!TestSetPageDirty(page)) {
-			struct address_space *mapping = page_mapping(page);
-			if (mapping)
-				__set_page_dirty(page, mapping, 0);
-		}
-	}
-}
-EXPORT_SYMBOL(mark_buffer_dirty_sync);
 
 /*
  * Decrement a buffer_head's reference count.  If all buffers against a page
@@ -2135,6 +2091,7 @@ int generic_write_end(struct file *file, struct address_space *mapping,
 			struct page *page, void *fsdata)
 {
 	struct inode *inode = mapping->host;
+	loff_t old_size = inode->i_size;
 	int i_size_changed = 0;
 
 	copied = block_write_end(file, mapping, pos, len, copied, page, fsdata);
@@ -2154,6 +2111,8 @@ int generic_write_end(struct file *file, struct address_space *mapping,
 	unlock_page(page);
 	page_cache_release(page);
 
+	if (old_size < pos)
+		pagecache_isize_extended(inode, old_size, pos);
 	/*
 	 * Don't mark the inode dirty under page lock. First, it unnecessarily
 	 * makes the holding time of page lock longer. Second, it forces lock
@@ -2371,6 +2330,11 @@ static int cont_expand_zero(struct file *file, struct address_space *mapping,
 		err = 0;
 
 		balance_dirty_pages_ratelimited(mapping);
+
+		if (unlikely(fatal_signal_pending(current))) {
+			err = -EINTR;
+			goto out;
+		}
 	}
 
 	/* page covers the boundary, find the boundary offset */
@@ -3111,11 +3075,6 @@ int _submit_bh(int rw, struct buffer_head *bh, unsigned long bio_flags)
 		rw |= REQ_META;
 	if (buffer_prio(bh))
 		rw |= REQ_PRIO;
-
-	if(buffer_sync_flush(bh)) {
-		rw |= REQ_SYNC;
-		clear_buffer_sync_flush(bh);
-	}
 
 	bio_get(bio);
 	submit_bio(rw, bio);

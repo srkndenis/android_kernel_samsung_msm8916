@@ -31,16 +31,20 @@
 #include "usb_gadget_xport.h"
 #include "u_rmnet.h"
 
-#define BAM_N_PORTS	 1
+#define BAM_N_PORTS	 2
 #define BAM2BAM_N_PORTS	 4
 
 static struct workqueue_struct *gbam_wq;
 static int n_bam_ports;
 static int n_bam2bam_ports;
 static unsigned n_tx_req_queued;
-static unsigned bam_ch_ids[] = { 8 };
 
-static const char *bam_ch_names[] = { "bam_dmux_ch_8" };
+static unsigned bam_ch_ids[BAM_N_PORTS] = {
+	BAM_DMUX_USB_RMNET_0,
+	BAM_DMUX_USB_DPL
+};
+
+static char bam_ch_names[BAM_N_PORTS][BAM_DMUX_CH_NAME_MAX_LEN];
 
 static const enum ipa_client_type usb_prod[BAM2BAM_N_PORTS] = {
 	IPA_CLIENT_USB_PROD, IPA_CLIENT_USB2_PROD,
@@ -223,7 +227,7 @@ static int gbam_alloc_requests(struct usb_ep *ep, struct list_head *head,
 {
 	int i;
 	struct usb_request *req;
-	pr_debug("%s: ep:%p head:%p num:%d cb:%p", __func__,
+	pr_debug("%s: ep:%pK head:%pK num:%d cb:%pK", __func__,
 			ep, head, num, cb);
 
 	for (i = 0; i < num; i++) {
@@ -430,7 +434,8 @@ static void gbam_write_data_tohost(struct gbam_port *port)
 		ret = usb_ep_queue(ep, req, GFP_ATOMIC);
 		spin_lock(&port->port_lock_dl);
 		if (ret) {
-			pr_err("%s: usb epIn failed with %d\n", __func__, ret);
+			pr_err_ratelimited("%s: usb epIn failed with %d\n",
+					__func__, ret);
 			list_add(&req->list, &d->tx_idle);
 			dev_kfree_skb_any(skb);
 			break;
@@ -460,7 +465,7 @@ void gbam_data_recv_cb(void *p, struct sk_buff *skb)
 	if (!skb)
 		return;
 
-	pr_debug("%s: p:%p#%d d:%p skb_len:%d\n", __func__,
+	pr_debug("%s: p:%pK#%d d:%pK skb_len:%d\n", __func__,
 			port, port->port_num, d, skb->len);
 
 	spin_lock_irqsave(&port->port_lock_dl, flags);
@@ -501,7 +506,7 @@ void gbam_data_write_done(void *p, struct sk_buff *skb)
 	d->pending_bytes_with_bam -= skb->len;
 	gbam_free_skb_to_pool(port, skb);
 
-	pr_debug("%s:port:%p d:%p tom:%lu ppkt:%u pbytes:%u pno:%d\n", __func__,
+	pr_debug("%s:port:%pK d:%pK tom:%lu ppkt:%u pbytes:%u pno:%d\n", __func__,
 			port, d, d->to_modem, d->pending_pkts_with_bam,
 			d->pending_bytes_with_bam, port->port_num);
 
@@ -576,7 +581,7 @@ static void gbam_data_write_tobam(struct work_struct *w)
 		d->pending_bytes_with_bam += skb->len;
 		d->to_modem++;
 
-		pr_debug("%s: port:%p d:%p tom:%lu ppkts:%u pbytes:%u pno:%d\n",
+		pr_debug("%s: port:%pK d:%pK tom:%lu ppkts:%u pbytes:%u pno:%d\n",
 				__func__, port, d,
 				d->to_modem, d->pending_pkts_with_bam,
 				d->pending_bytes_with_bam, port->port_num);
@@ -788,7 +793,7 @@ static void gbam_start_rx(struct gbam_port *port)
 	struct sk_buff			*skb;
 
 	spin_lock_irqsave(&port->port_lock_ul, flags);
-	if (!port->port_usb) {
+	if (!port->port_usb || !port->port_usb->out) {
 		spin_unlock_irqrestore(&port->port_lock_ul, flags);
 		return;
 	}
@@ -1019,7 +1024,7 @@ static void gbam_stop(void *param, enum usb_bam_pipe_dir dir)
 static int _gbam_start_io(struct gbam_port *port, bool in)
 {
 	unsigned long		flags;
-	int			ret;
+	int			ret = 0;
 	struct usb_ep		*ep;
 	struct list_head	*idle;
 	unsigned		queue_size;
@@ -1044,6 +1049,8 @@ static int _gbam_start_io(struct gbam_port *port, bool in)
 		ep_complete = gbam_epin_complete;
 	} else {
 		ep = port->port_usb->out;
+		if (!ep)
+			goto out;
 		idle = &port->data_ch.rx_idle;
 		queue_size = bam_mux_rx_q_size;
 		ep_complete = gbam_epout_complete;
@@ -1051,6 +1058,7 @@ static int _gbam_start_io(struct gbam_port *port, bool in)
 
 	ret = gbam_alloc_requests(ep, idle, queue_size, ep_complete,
 			GFP_ATOMIC);
+out:
 	spin_unlock_irqrestore(spinlock, flags);
 	if (ret)
 		pr_err("%s: allocation failed\n", __func__);
@@ -1062,7 +1070,7 @@ static void gbam_start_io(struct gbam_port *port)
 {
 	unsigned long		flags;
 
-	pr_debug("%s: port:%p\n", __func__, port);
+	pr_debug("%s: port:%pK\n", __func__, port);
 
 	if (_gbam_start_io(port, true))
 		return;
@@ -1108,7 +1116,7 @@ static void gbam_free_rx_buffers(struct gbam_port *port)
 
 	spin_lock_irqsave(&port->port_lock_ul, flags);
 
-	if (!port || !port->port_usb)
+	if (!port->port_usb || !port->port_usb->out)
 		goto free_rx_buf_out;
 
 	d = &port->data_ch;
@@ -1131,7 +1139,7 @@ static void gbam_free_tx_buffers(struct gbam_port *port)
 
 	spin_lock_irqsave(&port->port_lock_dl, flags);
 
-	if (!port || !port->port_usb)
+	if (!port->port_usb)
 		goto free_tx_buf_out;
 
 	d = &port->data_ch;
@@ -1232,6 +1240,7 @@ static void gbam_connect_work(struct work_struct *w)
 				__func__, d->id, ret);
 		return;
 	}
+
 	set_bit(BAM_CH_OPENED, &d->flags);
 
 	gbam_start_io(port);
@@ -1810,6 +1819,8 @@ static int gbam_port_alloc(int portno)
 
 	bam_ports[portno].port = port;
 
+	scnprintf(bam_ch_names[portno], BAM_DMUX_CH_NAME_MAX_LEN,
+			"bam_dmux_ch_%d", bam_ch_ids[portno]);
 	pdrv = &bam_ports[portno].pdrv;
 	pdrv->probe = gbam_data_ch_probe;
 	pdrv->remove = gbam_data_ch_remove;
@@ -1817,7 +1828,7 @@ static int gbam_port_alloc(int portno)
 	pdrv->driver.owner = THIS_MODULE;
 
 	platform_driver_register(pdrv);
-	pr_debug("%s: port:%p portno:%d\n", __func__, port, portno);
+	pr_debug("%s: port:%pK portno:%d\n", __func__, port, portno);
 
 	return 0;
 }
@@ -1857,7 +1868,7 @@ static int gbam2bam_port_alloc(int portno)
 	INIT_LIST_HEAD(&d->rx_idle);
 	INIT_WORK(&d->write_tobam_w, gbam_data_write_tobam);
 
-	pr_debug("%s: port:%p portno:%d\n", __func__, port, portno);
+	pr_debug("%s: port:%pK portno:%d\n", __func__, port, portno);
 
 	return 0;
 }
@@ -1889,7 +1900,7 @@ static ssize_t gbam_read_stats(struct file *file, char __user *ubuf,
 		d = &port->data_ch;
 
 		temp += scnprintf(buf + temp, DEBUG_BUF_SIZE - temp,
-				"#PORT:%d port:%p data_ch:%p#\n"
+				"#PORT:%d port:%pK data_ch:%pK#\n"
 				"dpkts_to_usbhost: %lu\n"
 				"dpkts_to_modem:  %lu\n"
 				"dpkts_pwith_bam: %u\n"
@@ -1979,6 +1990,9 @@ static void gbam_debugfs_init(void)
 {
 	struct dentry *dfile;
 
+	if (gbam_dent)
+		return;
+
 	gbam_dent = debugfs_create_dir("usb_rmnet", 0);
 	if (!gbam_dent || IS_ERR(gbam_dent))
 		return;
@@ -2006,7 +2020,7 @@ void gbam_disconnect(struct grmnet *gr, u8 port_num, enum transport_type trans)
 	unsigned long		flags, flags_ul;
 	struct bam_ch_info	*d;
 
-	pr_debug("%s: grmnet:%p port#%d\n", __func__, gr, port_num);
+	pr_debug("%s: grmnet:%pK port#%d\n", __func__, gr, port_num);
 
 	if (trans == USB_GADGET_XPORT_BAM &&
 		port_num >= n_bam_ports) {
@@ -2055,7 +2069,8 @@ void gbam_disconnect(struct grmnet *gr, u8 port_num, enum transport_type trans)
 	spin_unlock_irqrestore(&port->port_lock_ul, flags_ul);
 
 	/* disable endpoints */
-	usb_ep_disable(gr->out);
+	if (gr->out)
+		usb_ep_disable(gr->out);
 	usb_ep_disable(gr->in);
 
 	/*
@@ -2063,18 +2078,18 @@ void gbam_disconnect(struct grmnet *gr, u8 port_num, enum transport_type trans)
 	 * disable.
 	 */
 	if (d->trans == USB_GADGET_XPORT_BAM2BAM ||
-		d->trans == USB_GADGET_XPORT_BAM2BAM_IPA ||
-		d->trans == USB_GADGET_XPORT_BAM) {
+		d->trans == USB_GADGET_XPORT_BAM2BAM_IPA) {
 
 		if (d->dst_pipe_type == USB_BAM_PIPE_BAM2BAM)
 			gr->in->endless = false;
 
-		if (d->src_pipe_type == USB_BAM_PIPE_BAM2BAM)
+		if (d->src_pipe_type == USB_BAM_PIPE_BAM2BAM && gr->out)
 			gr->out->endless = false;
 	}
 
 	gr->in->driver_data = NULL;
-	gr->out->driver_data = NULL;
+	if (gr->out)
+		gr->out->driver_data = NULL;
 
 	if (trans == USB_GADGET_XPORT_BAM ||
 		trans == USB_GADGET_XPORT_BAM2BAM_IPA) {
@@ -2102,7 +2117,8 @@ int gbam_connect(struct grmnet *gr, u8 port_num,
 	int			ret;
 	unsigned long		flags, flags_ul;
 
-	pr_debug("%s: grmnet:%p port#%d\n", __func__, gr, port_num);
+	pr_debug("%s: grmnet:%pK port#%d\n", __func__, gr, port_num);
+
 	if (!gr) {
 		pr_err("%s: grmnet port is null\n", __func__);
 		return -ENODEV;
@@ -2197,8 +2213,7 @@ int gbam_connect(struct grmnet *gr, u8 port_num,
 	 * USB Endpoint.
 	 */
 	if (d->trans == USB_GADGET_XPORT_BAM2BAM ||
-		d->trans == USB_GADGET_XPORT_BAM2BAM_IPA ||
-		d->trans == USB_GADGET_XPORT_BAM) {
+		d->trans == USB_GADGET_XPORT_BAM2BAM_IPA) {
 
 		if (d->dst_pipe_type == USB_BAM_PIPE_BAM2BAM)
 			port->port_usb->in->endless = true;
@@ -2209,20 +2224,27 @@ int gbam_connect(struct grmnet *gr, u8 port_num,
 
 	ret = usb_ep_enable(gr->in);
 	if (ret) {
-		pr_err("%s: usb_ep_enable failed eptype:IN ep:%p",
+		pr_err("%s: usb_ep_enable failed eptype:IN ep:%pK",
 			__func__, gr->in);
 		goto exit;
 	}
 	gr->in->driver_data = port;
 
-	ret = usb_ep_enable(gr->out);
-	if (ret) {
-		pr_err("%s: usb_ep_enable failed eptype:OUT ep:%p",
-			__func__, gr->out);
-		gr->in->driver_data = 0;
-		goto exit;
+	/*
+	 * DPL traffic is routed through BAM-DMUX on some targets.
+	 * DPL function has only 1 IN endpoint. Add out endpoint
+	 * checks for BAM-DMUX transport.
+	 */
+	if (gr->out) {
+		ret = usb_ep_enable(gr->out);
+		if (ret) {
+			pr_err("%s: usb_ep_enable failed eptype:OUT ep:%pK",
+					__func__, gr->out);
+			gr->in->driver_data = 0;
+			goto exit;
+		}
+		gr->out->driver_data = port;
 	}
-	gr->out->driver_data = port;
 
 	port->last_event = U_BAM_CONNECT_E;
 	queue_work(gbam_wq, &port->connect_w);
@@ -2233,30 +2255,34 @@ exit:
 	return ret;
 }
 
-int gbam_setup(unsigned int no_bam_port, unsigned int no_bam2bam_port)
+int gbam_setup(unsigned int no_bam_port)
 {
 	int	i;
 	int	ret;
+	int	bam_port_start = n_bam_ports;
+	int	total_bam_ports = bam_port_start + no_bam_port;
 
-	pr_debug("%s: requested BAM ports:%d and BAM2BAM ports:%d\n",
-			  __func__, no_bam_port, no_bam2bam_port);
+	pr_debug("%s: requested BAM ports:%d\n", __func__, no_bam_port);
 
-	if ((!no_bam_port && !no_bam2bam_port) || no_bam_port > BAM_N_PORTS
-		|| no_bam2bam_port > BAM2BAM_N_PORTS) {
-		pr_err("%s: Invalid num of ports count:%d,%d\n",
-				__func__, no_bam_port, no_bam2bam_port);
+	if (!no_bam_port || total_bam_ports > BAM_N_PORTS) {
+		pr_err("%s: Invalid num of ports count:%d\n",
+				__func__, no_bam_port);
 		return -EINVAL;
 	}
 
-	gbam_wq = alloc_workqueue("k_gbam", WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
 	if (!gbam_wq) {
-		pr_err("%s: Unable to create workqueue gbam_wq\n",
-				__func__);
-		return -ENOMEM;
+		gbam_wq = alloc_workqueue("k_gbam", WQ_UNBOUND |
+					WQ_MEM_RECLAIM, 1);
+		if (!gbam_wq) {
+			pr_err("%s: Unable to create workqueue gbam_wq\n",
+					__func__);
+			return -ENOMEM;
+		}
 	}
 
-	for (i = 0; i < no_bam_port; i++) {
+	for (i = bam_port_start; i < (bam_port_start + no_bam_port); i++) {
 		n_bam_ports++;
+		pr_debug("gbam_port_alloc called for %d\n", i);
 		ret = gbam_port_alloc(i);
 		if (ret) {
 			n_bam_ports--;
@@ -2265,22 +2291,59 @@ int gbam_setup(unsigned int no_bam_port, unsigned int no_bam2bam_port)
 		}
 	}
 
-	for (i = 0; i < no_bam2bam_port; i++) {
+	gbam_debugfs_init();
+
+	return bam_port_start;
+
+free_bam_ports:
+	for (i = 0; i < n_bam_ports; i++)
+		gbam_port_free(i);
+	destroy_workqueue(gbam_wq);
+
+	return ret;
+}
+
+int gbam2bam_setup(unsigned int no_bam2bam_port)
+{
+	int	i;
+	int	ret;
+	int	bam2bam_port_start = n_bam2bam_ports;
+	int	total_bam2bam_ports = bam2bam_port_start + no_bam2bam_port;
+
+	pr_debug("%s: requested BAM2BAM ports:%d\n", __func__, no_bam2bam_port);
+
+	if (!no_bam2bam_port || total_bam2bam_ports > BAM2BAM_N_PORTS) {
+		pr_err("%s: Invalid num of ports count:%d\n",
+				__func__, no_bam2bam_port);
+		return -EINVAL;
+	}
+
+	if (!gbam_wq) {
+		gbam_wq = alloc_workqueue("k_gbam", WQ_UNBOUND |
+					WQ_MEM_RECLAIM, 1);
+		if (!gbam_wq) {
+			pr_err("%s: Unable to create workqueue gbam_wq\n",
+					__func__);
+			return -ENOMEM;
+		}
+	}
+
+	for (i = bam2bam_port_start; i < (bam2bam_port_start +
+				no_bam2bam_port); i++) {
 		n_bam2bam_ports++;
 		ret = gbam2bam_port_alloc(i);
 		if (ret) {
 			n_bam2bam_ports--;
 			pr_err("%s: Unable to alloc port:%d\n", __func__, i);
-			goto free_bam_ports;
+			goto free_bam2bam_ports;
 		}
 	}
 
 	gbam_debugfs_init();
-	return 0;
 
-free_bam_ports:
-	for (i = 0; i < n_bam_ports; i++)
-		gbam_port_free(i);
+	return bam2bam_port_start;
+
+free_bam2bam_ports:
 	for (i = 0; i < n_bam2bam_ports; i++)
 		gbam2bam_port_free(i);
 	destroy_workqueue(gbam_wq);

@@ -124,6 +124,7 @@ static int msm_iommu_dump_fault_regs(int smmu_id, int cb_num,
 				struct msm_scm_fault_regs_dump *regs)
 {
 	int ret;
+	struct scm_desc desc = {0};
 
 	struct msm_scm_fault_regs_dump_req {
 		uint32_t id;
@@ -133,15 +134,19 @@ static int msm_iommu_dump_fault_regs(int smmu_id, int cb_num,
 	} req_info;
 	int resp = 0;
 
-	req_info.id = smmu_id;
-	req_info.cb_num = cb_num;
-	req_info.buff = virt_to_phys(regs);
-	req_info.len = sizeof(*regs);
+	desc.args[0] = req_info.id = smmu_id;
+	desc.args[1] = req_info.cb_num = cb_num;
+	desc.args[2] = req_info.buff = virt_to_phys(regs);
+	desc.args[3] = req_info.len = sizeof(*regs);
+	desc.arginfo = SCM_ARGS(4, SCM_VAL, SCM_VAL, SCM_RW, SCM_VAL);
 
 	dmac_clean_range(regs, regs + 1);
-	ret = scm_call(SCM_SVC_UTIL, IOMMU_DUMP_SMMU_FAULT_REGS,
-		&req_info, sizeof(req_info), &resp, 1);
-
+	if (!is_scm_armv8())
+		ret = scm_call(SCM_SVC_UTIL, IOMMU_DUMP_SMMU_FAULT_REGS,
+			&req_info, sizeof(req_info), &resp, 1);
+	else
+		ret = scm_call2(SCM_SIP_FNID(SCM_SVC_UTIL,
+			IOMMU_DUMP_SMMU_FAULT_REGS), &desc);
 	dmac_inv_range(regs, regs + 1);
 
 	return ret;
@@ -281,12 +286,11 @@ irqreturn_t msm_iommu_secure_fault_handler_v2(int irq, void *dev_id)
 	iommu_access_ops->iommu_clk_on(drvdata);
 	tmp = msm_iommu_dump_fault_regs(drvdata->sec_id,
 					ctx_drvdata->num, regs);
-	iommu_access_ops->iommu_clk_off(drvdata);
 
 	if (tmp) {
 		pr_err("%s: Couldn't dump fault registers (%d) %s, ctx: %d\n",
 			__func__, tmp, drvdata->name, ctx_drvdata->num);
-		goto free_regs;
+		goto clock_off;
 	} else {
 		struct msm_iommu_context_reg ctx_regs[MAX_DUMP_REGS];
 		memset(ctx_regs, 0, sizeof(ctx_regs));
@@ -295,7 +299,7 @@ irqreturn_t msm_iommu_secure_fault_handler_v2(int irq, void *dev_id)
 		if (tmp < 0) {
 			ret = IRQ_NONE;
 			pr_err("Incorrect response from secure environment\n");
-			goto free_regs;
+			goto clock_off;
 		}
 
 		if (ctx_regs[DUMP_REG_FSR].val) {
@@ -327,6 +331,8 @@ irqreturn_t msm_iommu_secure_fault_handler_v2(int irq, void *dev_id)
 			ret = IRQ_NONE;
 		}
 	}
+clock_off:
+	iommu_access_ops->iommu_clk_off(drvdata);
 free_regs:
 	kfree(regs);
 lock_release:
@@ -485,11 +491,7 @@ static int msm_iommu_sec_map2(struct msm_scm_map2_req *map)
 	desc.args[4] = map->info.ctx_id;
 	desc.args[5] = map->info.va;
 	desc.args[6] = map->info.size;
-#ifdef CONFIG_MSM_IOMMU_TLBINVAL_ON_MAP
-	desc.args[7] = map->flags = IOMMU_TLBINVAL_FLAG;
-#else
 	desc.args[7] = map->flags = 0;
-#endif
 	desc.arginfo = SCM_ARGS(8, SCM_RW, SCM_VAL, SCM_VAL, SCM_VAL, SCM_VAL,
 				SCM_VAL, SCM_VAL, SCM_VAL);
 	if (!is_scm_armv8()) {
@@ -515,6 +517,9 @@ static int msm_iommu_sec_ptbl_map(struct msm_iommu_drvdata *iommu_drvdata,
 	phys_addr_t flush_pa;
 	int ret = 0;
 
+	if (!IS_ALIGNED(va, SZ_1M) || !IS_ALIGNED(len, SZ_1M) ||
+		!IS_ALIGNED(pa, SZ_1M))
+		return -EINVAL;
 	map.plist.list = virt_to_phys(&pa);
 	map.plist.list_size = 1;
 	map.plist.size = len;
@@ -566,22 +571,36 @@ static int msm_iommu_sec_ptbl_map_range(struct msm_iommu_drvdata *iommu_drvdata,
 	unsigned int offset = 0, chunk_offset = 0;
 	int ret;
 
+	if (!IS_ALIGNED(va, SZ_1M) || !IS_ALIGNED(len, SZ_1M))
+		return -EINVAL;
+
 	map.info.id = iommu_drvdata->sec_id;
 	map.info.ctx_id = ctx_drvdata->num;
 	map.info.va = va;
 	map.info.size = len;
 
 	if (sg->length == len) {
+		/*
+		 * physical address for secure mapping needs
+		 * to be 1MB aligned
+		 */
 		pa = get_phys_addr(sg);
+		if (!IS_ALIGNED(pa, SZ_1M))
+			return -EINVAL;
 		map.plist.list = virt_to_phys(&pa);
 		map.plist.list_size = 1;
 		map.plist.size = len;
 		flush_va = &pa;
 	} else {
 		sgiter = sg;
+		if (!IS_ALIGNED(sgiter->length, SZ_1M))
+			return -EINVAL;
 		cnt = sg->length / SZ_1M;
-		while ((sgiter = sg_next(sgiter)))
+		while ((sgiter = sg_next(sgiter))) {
+			if (!IS_ALIGNED(sgiter->length, SZ_1M))
+				return -EINVAL;
 			cnt += sgiter->length / SZ_1M;
+		}
 
 		pa_list = kmalloc(cnt * sizeof(*pa_list), GFP_KERNEL);
 		if (!pa_list)
@@ -590,6 +609,10 @@ static int msm_iommu_sec_ptbl_map_range(struct msm_iommu_drvdata *iommu_drvdata,
 		sgiter = sg;
 		cnt = 0;
 		pa = get_phys_addr(sgiter);
+		if (!IS_ALIGNED(pa, SZ_1M)) {
+			kfree(pa_list);
+			return -EINVAL;
+		}
 		while (offset < len) {
 			pa += chunk_offset;
 			pa_list[cnt] = pa;
@@ -636,6 +659,8 @@ static int msm_iommu_sec_ptbl_unmap(struct msm_iommu_drvdata *iommu_drvdata,
 	int ret, scm_ret;
 	struct scm_desc desc = {0};
 
+	if (!IS_ALIGNED(va, SZ_1M) || !IS_ALIGNED(len, SZ_1M))
+		return -EINVAL;
 	desc.args[0] = unmap.info.id = iommu_drvdata->sec_id;
 	desc.args[1] = unmap.info.ctx_id = ctx_drvdata->num;
 	desc.args[2] = unmap.info.va = va;
@@ -875,6 +900,9 @@ static int msm_iommu_unmap_range(struct iommu_domain *domain, unsigned int va,
 	struct msm_iommu_drvdata *iommu_drvdata;
 	struct msm_iommu_ctx_drvdata *ctx_drvdata;
 	int ret = -EINVAL;
+
+	if (!IS_ALIGNED(va, SZ_1M) || !IS_ALIGNED(len, SZ_1M))
+		return -EINVAL;
 
 	iommu_access_ops->iommu_lock_acquire(0);
 

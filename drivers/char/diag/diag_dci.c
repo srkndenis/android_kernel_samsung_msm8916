@@ -405,7 +405,7 @@ static int diag_process_single_dci_pkt(unsigned char *buf, int len,
 	uint8_t cmd_code = 0;
 
 	if (!buf || len < 0) {
-		pr_err("diag: Invalid input in %s, buf: %p, len: %d\n",
+		pr_err("diag: Invalid input in %s, buf: %pK, len: %d\n",
 			__func__, buf, len);
 		return -EIO;
 	}
@@ -749,7 +749,7 @@ static int diag_dci_remove_req_entry(unsigned char *buf, int len,
 {
 	uint16_t rsp_count = 0, delayed_rsp_id = 0;
 	if (!buf || len <= 0 || !entry) {
-		pr_err("diag: In %s, invalid input buf: %p, len: %d, entry: %p\n",
+		pr_err("diag: In %s, invalid input buf: %pK, len: %d, entry: %pK\n",
 			__func__, buf, len, entry);
 		return -EIO;
 	}
@@ -803,7 +803,7 @@ static void dci_process_ctrl_status(unsigned char *buf, int len, int token)
 	int peripheral_mask, status;
 
 	if (!buf || (len < sizeof(struct diag_ctrl_dci_status))) {
-		pr_err("diag: In %s, invalid buf %p or length: %d\n",
+		pr_err("diag: In %s, invalid buf %pK or length: %d\n",
 		       __func__, buf, len);
 		return;
 	}
@@ -1105,8 +1105,12 @@ void extract_dci_events(unsigned char *buf, int len, int data_source, int token)
 	/* Move directly to the start of the event series. 1 byte for
 	 * event code and 2 bytes for the length field.
 	 */
+	/* The length field indicates the total length removing the cmd_code
+	 * and the lenght field. The event parsing in that case should happen
+	 * till the end.
+	 */
 	temp_len = 3;
-	while (temp_len < (length - 1)) {
+	while (temp_len < length) {
 		event_id_packet = *(uint16_t *)(buf + temp_len);
 		event_id = event_id_packet & 0x0FFF; /* extract 12 bits */
 		if (event_id_packet & 0x8000) {
@@ -1678,6 +1682,10 @@ static int diag_dci_process_apps_pkt(struct diag_pkt_header_t *pkt_header,
 			write_len = sizeof(struct diag_pkt_header_t);
 			*(uint16_t *)(payload_ptr + write_len) = wrap_count;
 			write_len += sizeof(uint16_t);
+		} else if (ss_cmd_code == DIAG_EXT_MOBILE_ID) {
+			write_len = diag_cmd_get_mobile_id(req_buf, req_len,
+						   payload_ptr,
+						   APPS_BUF_SIZE - header_len);
 		}
 	}
 
@@ -1929,7 +1937,7 @@ int diag_process_dci_transaction(unsigned char *buf, int len)
 								__func__);
 			return -ENOMEM;
 		}
-		pr_debug("diag: head of dci log mask %p\n", head_log_mask_ptr);
+		pr_debug("diag: head of dci log mask %pK\n", head_log_mask_ptr);
 		count = 0; /* iterator for extracting log codes */
 
 		while (count < num_codes) {
@@ -1957,7 +1965,7 @@ int diag_process_dci_transaction(unsigned char *buf, int len)
 			while (log_mask_ptr && (offset < DCI_LOG_MASK_SIZE)) {
 				if (*log_mask_ptr == equip_id) {
 					found = 1;
-					pr_debug("diag: find equip id = %x at %p\n",
+					pr_debug("diag: find equip id = %x at %pK\n",
 						 equip_id, log_mask_ptr);
 					break;
 				} else {
@@ -2035,7 +2043,7 @@ int diag_process_dci_transaction(unsigned char *buf, int len)
 								__func__);
 			return -ENOMEM;
 		}
-		pr_debug("diag: head of dci event mask %p\n", event_mask_ptr);
+		pr_debug("diag: head of dci event mask %pK\n", event_mask_ptr);
 		count = 0; /* iterator for extracting log codes */
 		while (count < num_codes) {
 			if (read_len >= USER_SPACE_DATA) {
@@ -2091,7 +2099,7 @@ struct diag_dci_client_tbl *diag_dci_get_client_entry(int client_id)
 	return NULL;
 }
 
-struct diag_dci_client_tbl *dci_lookup_client_entry_pid(int pid)
+struct diag_dci_client_tbl *dci_lookup_client_entry_pid(int tgid)
 {
 	struct list_head *start, *temp;
 	struct diag_dci_client_tbl *entry = NULL;
@@ -2101,8 +2109,6 @@ struct diag_dci_client_tbl *dci_lookup_client_entry_pid(int pid)
 	list_for_each_safe(start, temp, &driver->dci_client_list) {
 		entry = list_entry(start, struct diag_dci_client_tbl, track);
 		pid_struct = find_get_pid(entry->tgid);
-                if (entry->client->tgid == pid)
-                        return entry;
 		if (!pid_struct) {
 			pr_err("diag: valid pid doesn't exist for pid = %d\n",
 				entry->tgid);
@@ -2114,6 +2120,9 @@ struct diag_dci_client_tbl *dci_lookup_client_entry_pid(int pid)
 				entry->tgid);
 			continue;
 		}
+		if (task_s == entry->client)
+			if (entry->client->tgid == tgid)
+				return entry;
 	}
 	return NULL;
 }
@@ -3109,7 +3118,7 @@ int diag_dci_write_proc(int peripheral, int pkt_type, char *buf, int len)
 
 	if (!buf || (peripheral < 0 || peripheral >= NUM_SMD_DCI_CHANNELS)
 		|| !driver->rcvd_feature_mask[peripheral] || len < 0) {
-		pr_err("diag: In %s, invalid data 0x%p, peripheral: %d, len: %d\n",
+		pr_err("diag: In %s, invalid data 0x%pK, peripheral: %d, len: %d\n",
 				__func__, buf, peripheral, len);
 		return -EINVAL;
 	}

@@ -7,9 +7,7 @@
 
 #include <linux/slab.h>
 #include <trace/events/sched.h>
-#ifdef CONFIG_PANIC_ON_RT_THROTTLING
-#include <linux/console.h>
-#endif
+
 int sched_rr_timeslice = RR_TIMESLICE;
 
 static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun);
@@ -861,14 +859,13 @@ static void dump_throttled_rt_tasks(struct rt_rq *rt_rq)
 out:
 #ifdef CONFIG_PANIC_ON_RT_THROTTLING
 	/*
-	 * Use pr_err() in the BUG() case since printk_sched() will
+	 * Use pr_err() in the BUG() case since printk_deferred() will
 	 * not get flushed and deadlock is not a concern.
 	 */
 	pr_err("%s", buf);
-	if (console_null_state)
-		BUG();
+	BUG();
 #else
-	printk_sched("%s", buf);
+	printk_deferred("%s", buf);
 #endif
 }
 
@@ -902,6 +899,7 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 			if (!once) {
 				once = true;
 				dump_throttled_rt_tasks(rt_rq);
+				printk_deferred("sched: RT throttling activated\n");
 			}
 		} else {
 			/*

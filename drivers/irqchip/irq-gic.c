@@ -45,6 +45,7 @@
 #include <linux/syscore_ops.h>
 #include <linux/msm_rtb.h>
 
+#include <asm/cputype.h>
 #include <asm/irq.h>
 #include <asm/exception.h>
 #include <asm/smp_plat.h>
@@ -210,6 +211,9 @@ static void gic_unmask_irq(struct irq_data *d)
 
 static void gic_disable_irq(struct irq_data *d)
 {
+	/* don't lazy-disable PPIs */
+	if (gic_irq(d) < 32)
+		gic_mask_irq(d);
 	if (gic_arch_extn.irq_disable)
 		gic_arch_extn.irq_disable(d);
 }
@@ -266,6 +270,14 @@ void gic_show_pending_irq(void)
 			pr_err("Pending irqs[%d] %lx\n", j, pending[j]);
 		}
 	}
+	if (pending[6] == 0x800000) { // pending irq is cpu_bwmon
+		pr_err("Clear Pending irqs 215\n");
+		writel_relaxed(pending[6], base +
+		GIC_DIST_PENDING_CLEAR + 6 * 4);
+		pending[6] = readl_relaxed(base +
+		GIC_DIST_PENDING_SET + 6 * 4);
+		pr_err("Read again : pending irqs[6] %lx\n", pending[6]);
+	}
 }
 
 static void gic_show_resume_irq(struct gic_chip_data *gic)
@@ -289,10 +301,6 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 	for (i = find_first_bit(pending, gic->gic_irqs);
 		i < gic->gic_irqs;
 		i = find_next_bit(pending, gic->gic_irqs, i+1)) {
-#ifdef CONFIG_SEC_PM_DEBUG
-			log_wakeup_reason(i + gic->irq_offset);
-			update_wakeup_reason_stats(i + gic->irq_offset);
-#endif
 	}
 }
 
@@ -1004,7 +1012,9 @@ void __init gic_init_bases(unsigned int gic_nr, int irq_start,
 		}
 
 		for_each_possible_cpu(cpu) {
-			unsigned long offset = percpu_offset * cpu_logical_map(cpu);
+			u32 mpidr = cpu_logical_map(cpu);
+			u32 core_id = MPIDR_AFFINITY_LEVEL(mpidr, 0);
+			unsigned long offset = percpu_offset * core_id;
 			*per_cpu_ptr(gic->dist_base.percpu_base, cpu) = dist_base + offset;
 			*per_cpu_ptr(gic->cpu_base.percpu_base, cpu) = cpu_base + offset;
 		}
@@ -1108,6 +1118,7 @@ int __init gic_of_init(struct device_node *node, struct device_node *parent)
 }
 IRQCHIP_DECLARE(cortex_a15_gic, "arm,cortex-a15-gic", gic_of_init);
 IRQCHIP_DECLARE(cortex_a9_gic, "arm,cortex-a9-gic", gic_of_init);
+IRQCHIP_DECLARE(cortex_a7_gic, "arm,cortex-a7-gic", gic_of_init);
 IRQCHIP_DECLARE(msm_8660_qgic, "qcom,msm-8660-qgic", gic_of_init);
 IRQCHIP_DECLARE(msm_qgic2, "qcom,msm-qgic2", gic_of_init);
 

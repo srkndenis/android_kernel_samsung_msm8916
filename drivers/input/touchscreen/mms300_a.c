@@ -469,9 +469,8 @@ struct mms_ts_info {
 	bool ta_status;
 	bool noise_mode;
 	bool threewave_mode;
-#ifdef TSP_GLOVE_MODE
 	bool glove_mode;
-#endif
+
 #ifdef TSP_SVIEW_COVER_MODE
 	u8 cover_mode_retry;
 	u8 cover_mode;

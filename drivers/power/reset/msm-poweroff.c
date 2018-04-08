@@ -129,7 +129,7 @@ void set_dload_mode(int on)
 #endif
 }
 EXPORT_SYMBOL(set_dload_mode);
-#if 0 /*  Always WARM Reset */
+#ifdef CONFIG_QCOM_HARDREBOOT_IMPLEMENTATION
 static bool get_dload_mode(void)
 {
 	return dload_mode_enabled;
@@ -189,10 +189,12 @@ static void enable_emergency_dload_mode(void)
 	pr_err("dload mode is not enabled on target\n");
 }
 
+#ifdef CONFIG_QCOM_HARDREBOOT_IMPLEMENTATION
 static bool get_dload_mode(void)
 {
 	return false;
 }
+#endif
 #endif
 
 void msm_set_restart_mode(int mode)
@@ -230,8 +232,10 @@ static void msm_restart_prepare(const char *cmd)
 #ifdef CONFIG_QCOM_HARDREBOOT_IMPLEMENTATION
 	bool need_warm_reset = false;
 #endif
+#ifndef CONFIG_QCOM_HARDREBOOT_IMPLEMENTATION
 	unsigned long value;
 	unsigned int warm_reboot_set = 0;
+#endif
 #ifndef CONFIG_SEC_DEBUG
 #ifdef CONFIG_MSM_DLOAD_MODE
 
@@ -279,6 +283,10 @@ Hence Qualcomm's PMIC hard reboot implementation has been taken, but disabled. *
 				(cmd != NULL && cmd[0] != '\0'));
 	}
 
+#ifdef CONFIG_MSM_PRESERVE_MEM
+	need_warm_reset = true;
+#endif
+
 	/* Hard reset the PMIC unless memory contents must be maintained. */
 	if (need_warm_reset) {
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
@@ -298,6 +306,18 @@ Hence Qualcomm's PMIC hard reboot implementation has been taken, but disabled. *
                         qpnp_pon_set_restart_reason(
                                 PON_RESTART_REASON_RTC);
                         __raw_writel(0x77665503, restart_reason);
+                } else if (!strcmp(cmd, "dm-verity device corrupted")) {
+                        qpnp_pon_set_restart_reason(
+                                PON_RESTART_REASON_DMVERITY_CORRUPTED);
+                        __raw_writel(0x77665508, restart_reason);
+                } else if (!strcmp(cmd, "dm-verity enforcing")) {
+                        qpnp_pon_set_restart_reason(
+                                PON_RESTART_REASON_DMVERITY_ENFORCE);
+                        __raw_writel(0x77665509, restart_reason);
+                } else if (!strcmp(cmd, "keys clear")) {
+                        qpnp_pon_set_restart_reason(
+                                PON_RESTART_REASON_KEYS_CLEAR);
+                        __raw_writel(0x7766550a, restart_reason);
                 } else if (!strncmp(cmd, "oem-", 4)) {
                         unsigned long code;
                         int ret;
@@ -307,6 +327,8 @@ Hence Qualcomm's PMIC hard reboot implementation has been taken, but disabled. *
                                              restart_reason);
                 } else if (!strncmp(cmd, "edl", 3)) {
                         enable_emergency_dload_mode();
+                } else if (!strncmp(cmd, "download", 8)) {
+                        __raw_writel(0x12345671, restart_reason);
                 } else {
                         __raw_writel(0x77665501, restart_reason);
                 }
@@ -324,6 +346,12 @@ Hence Qualcomm's PMIC hard reboot implementation has been taken, but disabled. *
 			__raw_writel(0x77665502, restart_reason);
 		} else if (!strcmp(cmd, "rtc")) {
 			__raw_writel(0x77665503, restart_reason);
+                } else if (!strcmp(cmd, "dm-verity device corrupted")) {
+                        __raw_writel(0x77665508, restart_reason);
+                } else if (!strcmp(cmd, "dm-verity enforcing")) {
+                        __raw_writel(0x77665509, restart_reason);
+                } else if (!strcmp(cmd, "keys clear")) {
+                        __raw_writel(0x7766550a, restart_reason);
 		} else if (!strncmp(cmd, "oem-", 4)) {
 			unsigned long code;
 			int ret;
@@ -336,7 +364,7 @@ Hence Qualcomm's PMIC hard reboot implementation has been taken, but disabled. *
 			__raw_writel(0x776655ee, restart_reason);
 			warm_reboot_set = 1;
 #endif
-        } else if (!strncmp(cmd, "download", 8)) {
+		} else if (!strncmp(cmd, "download", 8)) {
 		    __raw_writel(0x12345671, restart_reason);
                     warm_reboot_set = 1;
 		} else if (!strncmp(cmd, "nvbackup", 8)) {
@@ -563,6 +591,7 @@ static int msm_restart_probe(struct platform_device *pdev)
 		if (!emergency_dload_mode_addr)
 			pr_err("unable to map imem EDLOAD mode offset\n");
 	}
+
 #endif
 #ifndef CONFIG_SEC_DEBUG
 	np = of_find_compatible_node(NULL, NULL,

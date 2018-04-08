@@ -1,7 +1,7 @@
 /* include/linux/msm_audio.h
  *
  * Copyright (C) 2008 Google, Inc.
- * Copyright (c) 2012 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2014 The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -104,7 +104,6 @@
 		struct msm_audio_ion_info)
 #define AUDIO_DEREGISTER_ION _IOW(AUDIO_IOCTL_MAGIC, 98, \
 		struct msm_audio_ion_info)
-
 #define AUDIO_SET_EFFECTS_CONFIG   _IOW(AUDIO_IOCTL_MAGIC, 99, \
 				struct msm_hwacc_effects_config)
 #define AUDIO_EFFECTS_SET_BUF_LEN _IOW(AUDIO_IOCTL_MAGIC, 100, \
@@ -115,7 +114,7 @@
 #define AUDIO_EFFECTS_READ _IOWR(AUDIO_IOCTL_MAGIC, 103, void *)
 #define AUDIO_EFFECTS_SET_PP_PARAMS _IOW(AUDIO_IOCTL_MAGIC, 104, void *)
 
-#define	AUDIO_MAX_COMMON_IOCTL_NUM	100
+#define	AUDIO_MAX_COMMON_IOCTL_NUM	105
 
 
 #define HANDSET_MIC			0x01
@@ -150,6 +149,7 @@
 #define I2S_TX				0x21
 
 #define ADRC_ENABLE		0x0001
+#define EQUALIZER_ENABLE	0x0002
 #define IIR_ENABLE		0x0004
 #define QCONCERT_PLUS_ENABLE	0x0008
 #define MBADRC_ENABLE		0x0010

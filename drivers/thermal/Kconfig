@@ -129,12 +129,14 @@ config THERMAL_MONITOR
 	  entity starts running in the userspace. Monitors TSENS temperature
 	  and limits the max frequency of the cores.
 
-config DEBUG_THERMAL
-	bool "Monitor thermal state and limit CPU Frequency"
-	depends on THERMAL
-	default n
+config SUPPLY_LM_MONITOR
+	bool "SUPPLY current monitor driver"
+	depends on THERMAL && PM_OPP && CPU_FREQ
 	help
-	  Monitors TSENS temperature for Debugging purporse.
+	 This enables to monitor power states of different HW blocks
+	 including cpu, gpu and modem, number of cores online and SoC
+	 temperature. Based on these inputs, the driver throttles
+	 apps subsystem.
 
 config SPEAR_THERMAL
 	bool "SPEAr thermal sensor driver"

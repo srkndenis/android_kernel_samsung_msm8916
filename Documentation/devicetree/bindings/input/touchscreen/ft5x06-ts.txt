@@ -99,5 +99,7 @@ Example:
 			focaltech,fw-delay-readid-ms = <10>;
 			focaltech,fw-delay-era-flsh-ms = <2000>;
 			focaltech,fw-auto-cal;
+			focaltech,psensor-support;
+			focaltech,gesture-support;
 		};
 	};

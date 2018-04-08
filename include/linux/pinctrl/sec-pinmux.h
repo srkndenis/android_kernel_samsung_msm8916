@@ -75,10 +75,6 @@ struct gpiomux_setting {
 	enum gpiomux_dir  dir;
 };
 
-#ifdef CONFIG_SEC_PM_DEBUG
-void msm_gpio_print_enabled(void);
-#endif
-
 void msm_tlmm_v4_get_gp_cfg(uint pin_no, struct gpiomux_setting *val);
 int msm_tlmm_v4_set_gp_cfg(uint pin_no, uint id, bool level);
 int msm_tlmm_v4_get_gp_value(uint pin_no);

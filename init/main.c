@@ -147,11 +147,6 @@ static char *ramdisk_execute_command;
 unsigned int reset_devices;
 EXPORT_SYMBOL(reset_devices);
 
-#ifdef CONFIG_KNOX_KAP
-int boot_mode_security;
-EXPORT_SYMBOL(boot_mode_security);
-#endif
-
 static int __init set_reset_devices(char *str)
 {
 	reset_devices = 1;
@@ -413,15 +408,6 @@ static int __init do_early_param(char *param, char *val, const char *unused)
 		}
 	}
 	/* We accept everything at this stage. */
-#ifdef CONFIG_KNOX_KAP
-	if ((strncmp(param, "androidboot.security_mode", 26) == 0)) {
-		pr_warn("val = %d\n",*val);
-	        if ((strncmp(val, "1526595585", 10) == 0)) {
-				pr_info("Security Boot Mode \n");
-				boot_mode_security = 1;
-			}
-	}
-#endif
 	return 0;
 }
 
@@ -622,6 +608,10 @@ asmlinkage void __init start_kernel(void)
 #ifdef CONFIG_X86
 	if (efi_enabled(EFI_RUNTIME_SERVICES))
 		efi_enter_virtual_mode();
+#endif
+#ifdef CONFIG_X86_ESPFIX64
+	/* Should be run before the first non-init thread is created */
+	init_espfix_bsp();
 #endif
 	thread_info_cache_init();
 	cred_init();
@@ -830,7 +820,6 @@ static noinline void __init kernel_init_freeable(void);
 static int __ref kernel_init(void *unused)
 {
 	kernel_init_freeable();
-	
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
 	free_initmem();

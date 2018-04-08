@@ -1158,19 +1158,6 @@ static void mmc_sd_detect(struct mmc_host *host)
 	BUG_ON(!host);
 	BUG_ON(!host->card);
 
-#if	defined(CONFIG_SEC_HYBRID_TRAY)
-
-	if (host->ops->get_cd && host->ops->get_cd(host) == 0) {
-		mmc_card_set_removed(host->card);
-		mmc_claim_host(host);
-		mmc_power_off(host);
-		mmc_sd_remove(host);
-		mmc_detach_bus(host);
-		mmc_release_host(host);
-		return;
-	}
-#endif
-
 	mmc_rpm_hold(host, &host->card->dev);
 	mmc_claim_host(host);
 
@@ -1229,7 +1216,8 @@ static int mmc_sd_suspend(struct mmc_host *host)
 	 * Disable clock scaling before suspend and enable it after resume so
 	 * as to avoid clock scaling decisions kicking in during this window.
 	 */
-	mmc_disable_clk_scaling(host);
+	if (mmc_can_scale_clk(host))
+		mmc_disable_clk_scaling(host);
 
 	mmc_claim_host(host);
 	if (!mmc_host_is_spi(host))

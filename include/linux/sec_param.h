@@ -18,16 +18,14 @@ struct sec_param_data {
 #ifdef CONFIG_GSM_MODEM_SPRD6500
 	unsigned int update_cp_bin;
 #endif
-#ifdef CONFIG_RTC_AUTO_PWRON_PARAM
-	unsigned int boot_alarm_set;
-	unsigned int boot_alarm_value_l;
-	unsigned int boot_alarm_value_h;
-#endif
 #ifdef CONFIG_SEC_MONITOR_BATTERY_REMOVAL
 	unsigned int normal_poweroff;
 #endif
 #ifdef CONFIG_RESTART_REASON_SEC_PARAM
 	unsigned int param_restart_reason;
+#endif
+#ifdef CONFIG_BARCODE_PAINTER
+	char param_barcode_info[1024];
 #endif
 };
 
@@ -41,16 +39,14 @@ enum sec_param_index {
 #ifdef CONFIG_GSM_MODEM_SPRD6500
 	param_update_cp_bin,
 #endif
-#ifdef CONFIG_RTC_AUTO_PWRON_PARAM
-	param_index_boot_alarm_set,
-	param_index_boot_alarm_value_l,
-	param_index_boot_alarm_value_h,
-#endif
 #ifdef CONFIG_SEC_MONITOR_BATTERY_REMOVAL
 	param_index_normal_poweroff,
 #endif
 #ifdef CONFIG_RESTART_REASON_SEC_PARAM
 	param_index_restart_reason,
+#endif
+#ifdef CONFIG_BARCODE_PAINTER
+	param_index_barcode_info,
 #endif
 };
 

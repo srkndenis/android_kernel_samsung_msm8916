@@ -1,6 +1,6 @@
 /* Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2009-2014, 2016 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2017, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -131,7 +131,10 @@ static int audio_aio_ion_lookup_vaddr(struct q6audio_aio *audio, void *addr,
 	list_for_each_entry(region_elt, &audio->ion_region_queue, list) {
 		if (addr >= region_elt->vaddr &&
 			addr < region_elt->vaddr + region_elt->len &&
-			addr + len <= region_elt->vaddr + region_elt->len) {
+			addr + len <= region_elt->vaddr + region_elt->len &&
+			addr + len > addr) {
+			/* to avoid integer addition overflow */
+
 			/* offset since we could pass vaddr inside a registerd
 			* ion buffer
 			*/
@@ -149,7 +152,8 @@ static int audio_aio_ion_lookup_vaddr(struct q6audio_aio *audio, void *addr,
 					list) {
 			if (addr >= region_elt->vaddr &&
 			addr < region_elt->vaddr + region_elt->len &&
-			addr + len <= region_elt->vaddr + region_elt->len)
+			addr + len <= region_elt->vaddr + region_elt->len &&
+			addr + len > addr)
 				pr_err("\t%s[%pK]:%pK, %ld --> %pK\n",
 					__func__, audio,
 					region_elt->vaddr,
@@ -844,6 +848,7 @@ static long audio_aio_process_event_req_compat(struct q6audio_aio *audio,
 	long rc;
 	struct msm_audio_event32 usr_evt_32;
 	struct msm_audio_event usr_evt;
+	memset(&usr_evt, 0, sizeof(struct msm_audio_event));
 
 	if (copy_from_user(&usr_evt_32, arg,
 				sizeof(struct msm_audio_event32))) {
@@ -853,6 +858,11 @@ static long audio_aio_process_event_req_compat(struct q6audio_aio *audio,
 	usr_evt.timeout_ms = usr_evt_32.timeout_ms;
 
 	rc = audio_aio_process_event_req_common(audio, &usr_evt);
+	if (rc < 0) {
+		pr_err("%s: audio process event failed, rc = %ld",
+			__func__, rc);
+		return rc;
+	}
 
 	usr_evt_32.event_type = usr_evt.event_type;
 	switch (usr_evt_32.event_type) {
@@ -1940,6 +1950,7 @@ static long audio_aio_compat_ioctl(struct file *file, unsigned int cmd,
 	case AUDIO_GET_CONFIG_32: {
 		struct msm_audio_config32 cfg_32;
 		mutex_lock(&audio->lock);
+		memset(&cfg_32, 0, sizeof(cfg_32));
 		cfg_32.buffer_size = audio->pcm_cfg.buffer_size;
 		cfg_32.buffer_count = audio->pcm_cfg.buffer_count;
 		cfg_32.channel_count = audio->pcm_cfg.channel_count;
@@ -2004,7 +2015,7 @@ static long audio_aio_compat_ioctl(struct file *file, unsigned int cmd,
 		struct msm_audio_buf_cfg cfg;
 		struct msm_audio_buf_cfg32 cfg_32;
 		mutex_lock(&audio->lock);
-		if (copy_from_user(&cfg, (void *)arg, sizeof(cfg))) {
+		if (copy_from_user(&cfg_32, (void *)arg, sizeof(cfg_32))) {
 			pr_err("%s: copy_from_user for AUDIO_SET_CONFIG_32 failed\n",
 				__func__);
 			rc = -EFAULT;
@@ -2036,6 +2047,7 @@ static long audio_aio_compat_ioctl(struct file *file, unsigned int cmd,
 			audio->buf_cfg.frames_per_buf);
 
 		mutex_lock(&audio->lock);
+		memset(&cfg_32, 0, sizeof(cfg_32));
 		cfg_32.meta_info_enable = audio->buf_cfg.meta_info_enable;
 		cfg_32.frames_per_buf = audio->buf_cfg.frames_per_buf;
 		if (copy_to_user((void *)arg, &cfg_32,

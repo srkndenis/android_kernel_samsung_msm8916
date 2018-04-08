@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2014,2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -34,6 +34,7 @@ struct pil_priv;
  * This defaults to ioremap if not specified.
  * @unmap_fw_mem: Custom function used to undo mapping by map_fw_mem.
  * This defaults to iounmap if not specified.
+ * @clear_fw_region: Clear fw region on failure in loading.
  */
 struct pil_desc {
 	const char *name;
@@ -49,6 +50,7 @@ struct pil_desc {
 	void * (*map_fw_mem)(phys_addr_t phys, size_t size, void *data);
 	void (*unmap_fw_mem)(void *virt, size_t size, void *data);
 	void *map_data;
+	bool clear_fw_region;
 };
 
 /**
@@ -92,6 +94,7 @@ struct pil_reset_ops {
 extern int pil_desc_init(struct pil_desc *desc);
 extern int pil_boot(struct pil_desc *desc);
 extern void pil_shutdown(struct pil_desc *desc);
+extern void pil_free_memory(struct pil_desc *desc);
 extern void pil_desc_release(struct pil_desc *desc);
 extern phys_addr_t pil_get_entry_addr(struct pil_desc *desc);
 extern int pil_do_ramdump(struct pil_desc *desc, void *ramdump_dev);
@@ -99,6 +102,7 @@ extern int pil_do_ramdump(struct pil_desc *desc, void *ramdump_dev);
 static inline int pil_desc_init(struct pil_desc *desc) { return 0; }
 static inline int pil_boot(struct pil_desc *desc) { return 0; }
 static inline void pil_shutdown(struct pil_desc *desc) { }
+static inline void pil_free_memory(struct pil_desc *desc) { }
 static inline void pil_desc_release(struct pil_desc *desc) { }
 static inline phys_addr_t pil_get_entry_addr(struct pil_desc *desc)
 {
