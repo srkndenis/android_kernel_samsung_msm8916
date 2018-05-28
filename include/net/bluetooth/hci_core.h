@@ -271,6 +271,8 @@ struct hci_dev {
 
 	struct hci_dev_stats	stat;
 
+	void			*driver_data;
+
 	atomic_t		promisc;
 
 	struct dentry		*debugfs;
@@ -290,11 +292,14 @@ struct hci_dev {
 	__u8			adv_data[HCI_MAX_AD_LENGTH];
 	__u8			adv_data_len;
 
+	struct module *owner;
+
 	int (*open)(struct hci_dev *hdev);
 	int (*close)(struct hci_dev *hdev);
 	int (*flush)(struct hci_dev *hdev);
 	int (*setup)(struct hci_dev *hdev);
 	int (*send)(struct sk_buff *skb);
+	void (*destruct)(struct hci_dev *hdev);
 	void (*notify)(struct hci_dev *hdev, unsigned int evt);
 	int (*ioctl)(struct hci_dev *hdev, unsigned int cmd, unsigned long arg);
 };
