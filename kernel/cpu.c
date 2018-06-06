@@ -157,7 +157,8 @@ void cpu_hotplug_disable(void)
 void cpu_hotplug_enable(void)
 {
 	cpu_maps_update_begin();
-	cpu_hotplug_disabled = 0;
+	cpu_hotplug_disabled = 0
+	WARN_ON(--cpu_hotplug_disabled < 0);
 	cpu_maps_update_done();
 }
 
@@ -549,7 +550,11 @@ void __ref enable_nonboot_cpus(void)
 
 	/* Allow everyone to use the CPU hotplug again */
 	cpu_maps_update_begin();
+<<<<<<< HEAD
 	cpu_hotplug_disabled = 0;
+=======
+	WARN_ON(--cpu_hotplug_disabled < 0);
+>>>>>>> ea0f079eeef3... Revert "cpu/hotplug: Handle unbalanced hotplug enable/disable"
 	if (cpumask_empty(frozen_cpus))
 		goto out;
 
