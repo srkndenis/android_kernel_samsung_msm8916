@@ -1355,7 +1355,7 @@ static int btusb_probe(struct usb_interface *intf,
 	struct usb_endpoint_descriptor *ep_desc;
 	struct btusb_data *data;
 	struct hci_dev *hdev;
-	int i, version, err;
+	int i, err;
 
 	BT_DBG("intf %p id %p", intf, id);
 
@@ -1665,9 +1665,6 @@ MODULE_PARM_DESC(disable_scofix, "Disable fixup of wrong SCO buffer size");
 
 module_param(force_scofix, bool, 0644);
 MODULE_PARM_DESC(force_scofix, "Force fixup of wrong SCO buffers size");
-
-module_param(reset, bool, 0644);
-MODULE_PARM_DESC(reset, "Send HCI reset command on initialization");
 
 MODULE_AUTHOR("Marcel Holtmann <marcel@holtmann.org>");
 MODULE_DESCRIPTION("Generic Bluetooth USB driver ver " VERSION);
