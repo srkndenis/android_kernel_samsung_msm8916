@@ -165,7 +165,7 @@ static int ovl_set_timestamps(struct dentry *upperdentry, struct kstat *stat)
 		.ia_mtime = stat->mtime,
 	};
 
-	return notify_change(upperdentry, &attr, NULL);
+	return notify_change(upperdentry, &attr);
 }
 
 int ovl_set_attr(struct dentry *upperdentry, struct kstat *stat)
@@ -178,7 +178,7 @@ int ovl_set_attr(struct dentry *upperdentry, struct kstat *stat)
 			.ia_valid = ATTR_MODE,
 			.ia_mode = stat->mode,
 		};
-		err = notify_change(upperdentry, &attr, NULL);
+		err = notify_change(upperdentry, &attr);
 	}
 	if (!err) {
 		struct iattr attr = {
@@ -186,7 +186,7 @@ int ovl_set_attr(struct dentry *upperdentry, struct kstat *stat)
 			.ia_uid = stat->uid,
 			.ia_gid = stat->gid,
 		};
-		err = notify_change(upperdentry, &attr, NULL);
+		err = notify_change(upperdentry, &attr);
 	}
 	if (!err)
 		ovl_set_timestamps(upperdentry, stat);

@@ -433,7 +433,6 @@ static int sb_permission(struct super_block *sb, struct inode *inode, int mask)
 	}
 	return 0;
 }
-EXPORT_SYMBOL(__inode_permission);
 
 /**
  * inode_permission - Check for access rights to a given inode
@@ -4035,7 +4034,7 @@ SYSCALL_DEFINE2(rename, const char __user *, oldname, const char __user *, newna
 
 int vfs_whiteout(struct inode *dir, struct dentry *dentry)
 {
-       int error = may_create(dir, dentry);
+       int error = may_create(NULL, dir, dentry);
        if (error)
                return error;
 
